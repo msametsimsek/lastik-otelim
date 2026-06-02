@@ -21,17 +21,6 @@ const KEYS = {
   SUBSCRIPTION: "lastikTakip_subscription"
 };
 
-const DEFAULT_DEMO_USER: AuthUser = {
-  id: "demo-user",
-  businessName: "LastikOtelim Demo",
-  ownerName: "Demo Kullanıcı",
-  email: "demo@lastiktakip.com",
-  password: "Demo12345",
-  phone: "",
-  businessType: "Oto Lastik & Rot Balans Servisi",
-  address: ""
-};
-
 const DEFAULT_SETTINGS: AppSettings = {
   businessName: "LastikOtelim",
   businessType: "Oto Lastik & Rot Balans Servisi",
@@ -289,19 +278,7 @@ export const StorageService = {
   },
 
   getUsers(): AuthUser[] {
-    const users = getSafeItem<AuthUser[]>(KEYS.USERS, []);
-
-    const hasDemoUser = users.some(
-      (user) =>
-        user.email.toLowerCase() === DEFAULT_DEMO_USER.email.toLowerCase()
-    );
-
-    if (!hasDemoUser) {
-      users.push(DEFAULT_DEMO_USER);
-      setSafeItem(KEYS.USERS, users);
-    }
-
-    return users;
+    return getSafeItem<AuthUser[]>(KEYS.USERS, []);
   },
 
   registerUser(user: AuthUser): void {

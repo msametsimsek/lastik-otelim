@@ -183,7 +183,7 @@ export default function SettingsPage({
       setAddress(config.address);
 
       setShowConfirmReset(false);
-      showToast("Tüm veriler temizlendi ve demo kayıtları yeniden yüklendi.", "success");
+      showToast("Tüm local veriler başarıyla temizlendi.", "success");
     } catch {
       showToast("Sıfırlama başarısız oldu.", "error");
     }

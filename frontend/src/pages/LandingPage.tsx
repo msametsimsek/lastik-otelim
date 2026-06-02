@@ -11,8 +11,6 @@ import {
   Database,
   FileSpreadsheet,
   MapPin,
-  Menu,
-  Play,
   Printer,
   QrCode,
   Search,
@@ -27,7 +25,6 @@ import {
 
 interface LandingPageProps {
   onNavigate: (view: "login" | "register") => void;
-  onDemoLogin: () => void;
 }
 
 const LogoMark = () => (
@@ -50,14 +47,21 @@ const LogoMark = () => (
         strokeLinecap="round"
         strokeWidth="3"
       />
-      <path d="M7 20h9M5 30h10M8 40h8" stroke="#f59e0b" strokeLinecap="round" strokeWidth="4" />
+      <path
+        d="M7 20h9M5 30h10M8 40h8"
+        stroke="#f59e0b"
+        strokeLinecap="round"
+        strokeWidth="4"
+      />
     </svg>
   </div>
 );
 
 const PlateCard = () => (
   <div className="absolute -left-2 top-10 hidden rotate-[-5deg] rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xl shadow-blue-950/10 sm:block lg:-left-8">
-    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Plaka Arama</div>
+    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+      Plaka Arama
+    </div>
     <div className="mt-2 rounded-xl border-2 border-slate-900 bg-slate-50 px-4 py-2 text-center font-black tracking-widest text-slate-900">
       34 ABC 01
     </div>
@@ -85,9 +89,12 @@ const HeroIllustration = () => {
             </div>
             <div>
               <p className="text-sm font-black text-slate-950">LastikOtelim Panel</p>
-              <p className="text-[11px] font-bold text-slate-400">Bugünkü saklama operasyonu</p>
+              <p className="text-[11px] font-bold text-slate-400">
+                Bugünkü saklama operasyonu
+              </p>
             </div>
           </div>
+
           <div className="hidden items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-black text-emerald-700 sm:flex">
             <span className="h-2 w-2 rounded-full bg-emerald-500" />
             Aktif
@@ -103,14 +110,24 @@ const HeroIllustration = () => {
               [Warehouse, "Raf", "128"]
             ].map(([Icon, label, value]) => {
               const StatIcon = Icon as typeof Users2;
+
               return (
-                <div key={label as string} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                <div
+                  key={label as string}
+                  className="rounded-2xl border border-slate-100 bg-slate-50 p-3"
+                >
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <StatIcon className="h-4 w-4 text-blue-600" />
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-400 ring-1 ring-slate-200">+12%</span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-400 ring-1 ring-slate-200">
+                      +12%
+                    </span>
                   </div>
-                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">{label as string}</p>
-                  <p className="mt-1 text-xl font-black text-slate-950">{value as string}</p>
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                    {label as string}
+                  </p>
+                  <p className="mt-1 text-xl font-black text-slate-950">
+                    {value as string}
+                  </p>
                 </div>
               );
             })}
@@ -121,7 +138,9 @@ const HeroIllustration = () => {
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-black text-slate-950">Saklama Yoğunluğu</p>
-                  <p className="text-[11px] font-bold text-slate-400">Mevsimsel lastik dağılımı</p>
+                  <p className="text-[11px] font-bold text-slate-400">
+                    Mevsimsel lastik dağılımı
+                  </p>
                 </div>
                 <BarChart3 className="h-5 w-5 text-blue-600" />
               </div>
@@ -138,7 +157,10 @@ const HeroIllustration = () => {
                       <span>{value as string}</span>
                     </div>
                     <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                      <div className={`h-full rounded-full ${color as string}`} style={{ width: value as string }} />
+                      <div
+                        className={`h-full rounded-full ${color as string}`}
+                        style={{ width: value as string }}
+                      />
                     </div>
                   </div>
                 ))}
@@ -150,12 +172,18 @@ const HeroIllustration = () => {
                 <p className="text-sm font-black text-slate-950">Raf Durumu</p>
                 <Search className="h-4 w-4 text-blue-600" />
               </div>
+
               <div className="space-y-2">
                 {rows.map(([plate, shelf, type, status]) => (
-                  <div key={plate} className="grid grid-cols-[1fr_auto] gap-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-100">
+                  <div
+                    key={plate}
+                    className="grid grid-cols-[1fr_auto] gap-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-100"
+                  >
                     <div>
                       <p className="text-xs font-black text-slate-950">{plate}</p>
-                      <p className="mt-0.5 text-[10px] font-bold text-slate-400">{type} • {status}</p>
+                      <p className="mt-0.5 text-[10px] font-bold text-slate-400">
+                        {type} • {status}
+                      </p>
                     </div>
                     <div className="grid place-items-center rounded-xl bg-blue-50 px-3 text-xs font-black text-blue-700">
                       {shelf}
@@ -174,8 +202,12 @@ const HeroIllustration = () => {
               [FileSpreadsheet, "Rapor"]
             ].map(([Icon, label]) => {
               const ActionIcon = Icon as typeof QrCode;
+
               return (
-                <div key={label as string} className="flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-3 text-xs font-black text-blue-700">
+                <div
+                  key={label as string}
+                  className="flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-3 text-xs font-black text-blue-700"
+                >
                   <ActionIcon className="h-4 w-4 shrink-0" />
                   {label as string}
                 </div>
@@ -191,8 +223,12 @@ const HeroIllustration = () => {
             <Clock3 className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-xs font-black text-slate-950">Yoğun sezonda hızlı teslim</p>
-            <p className="text-[11px] font-bold text-slate-400">Plaka ile saniyeler içinde bul</p>
+            <p className="text-xs font-black text-slate-950">
+              Yoğun sezonda hızlı teslim
+            </p>
+            <p className="text-[11px] font-bold text-slate-400">
+              Plaka ile saniyeler içinde bul
+            </p>
           </div>
         </div>
       </div>
@@ -200,7 +236,7 @@ const HeroIllustration = () => {
   );
 };
 
-export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProps) {
+export default function LandingPage({ onNavigate }: LandingPageProps) {
   const [activeFaq, setActiveFaq] = useState<number | null>(0);
 
   const toggleFaq = (index: number) => {
@@ -264,10 +300,26 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
   ];
 
   const targets = [
-    { icon: Warehouse, name: "Oto Lastik Bayileri", desc: "Sezonluk lastik saklama hizmeti veren işletmeler." },
-    { icon: Wrench, name: "Rot Balans Noktaları", desc: "Günlük giriş-çıkış trafiği yoğun servis noktaları." },
-    { icon: Car, name: "Özel Oto Servisleri", desc: "Müşterisine düzenli lastik saklama hizmeti sunan servisler." },
-    { icon: Database, name: "Depolu İşletmeler", desc: "Raf, konum ve geçmiş takibini dijitalleştirmek isteyenler." }
+    {
+      icon: Warehouse,
+      name: "Oto Lastik Bayileri",
+      desc: "Sezonluk lastik saklama hizmeti veren işletmeler."
+    },
+    {
+      icon: Wrench,
+      name: "Rot Balans Noktaları",
+      desc: "Günlük giriş-çıkış trafiği yoğun servis noktaları."
+    },
+    {
+      icon: Car,
+      name: "Özel Oto Servisleri",
+      desc: "Müşterisine düzenli lastik saklama hizmeti sunan servisler."
+    },
+    {
+      icon: Database,
+      name: "Depolu İşletmeler",
+      desc: "Raf, konum ve geçmiş takibini dijitalleştirmek isteyenler."
+    }
   ];
 
   const pricing = [
@@ -334,10 +386,6 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
       a: "Evet. Sistem standart yazdırma akışıyla çalışacak şekilde tasarlanmıştır. Termal etiket yazıcı veya A4 yazıcı kullanımına göre şablon düzeni geliştirilebilir."
     },
     {
-      q: "Demo hesap fiyatlandırmada neden görünmüyor?",
-      a: "Demo hesap yalnızca sistemi geliştirme ve test sürecinde hızlı denemek için kullanılır. Satış paketleri gerçek kullanım planlarına göre ayrılır."
-    },
-    {
       q: "Verilerimi Excel olarak alabilir miyim?",
       a: "Paket kapsamına göre kayıtları CSV/Excel formatında dışa aktarma ve eski kayıtları takip etme özellikleri eklenebilir."
     }
@@ -345,30 +393,36 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
 
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-[#f7f9fc] text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
-      <nav className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/85 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-10">
+      <nav className="fixed inset-x-0 top-0 z-50 border-b border-slate-200/70 bg-white/90 px-4 py-3 backdrop-blur-xl shadow-sm shadow-slate-900/5 sm:px-6 lg:px-10">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <LogoMark />
             <div className="min-w-0 leading-tight">
-              <h1 className="truncate text-lg font-black tracking-tight text-slate-950">LastikOtelim</h1>
-              <p className="truncate text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">Lastik saklama yönetimi</p>
+              <h1 className="truncate text-lg font-black tracking-tight text-slate-950">
+                LastikOtelim
+              </h1>
+              <p className="truncate text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">
+                Lastik saklama yönetimi
+              </p>
             </div>
           </div>
 
           <div className="hidden items-center gap-8 text-sm font-bold text-slate-600 lg:flex">
-            <a href="#features" className="transition-colors hover:text-blue-700">Özellikler</a>
-            <a href="#workflow" className="transition-colors hover:text-blue-700">Nasıl Çalışır?</a>
-            <a href="#pricing" className="transition-colors hover:text-blue-700">Fiyatlandırma</a>
-            <a href="#faq" className="transition-colors hover:text-blue-700">SSS</a>
+            <a href="#features" className="transition-colors hover:text-blue-700">
+              Özellikler
+            </a>
+            <a href="#workflow" className="transition-colors hover:text-blue-700">
+              Nasıl Çalışır?
+            </a>
+            <a href="#pricing" className="transition-colors hover:text-blue-700">
+              Fiyatlandırma
+            </a>
+            <a href="#faq" className="transition-colors hover:text-blue-700">
+              SSS
+            </a>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={onDemoLogin}
-              className="hidden rounded-2xl px-4 py-2.5 text-xs font-black text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 sm:inline-flex"
-            >
-              Demo Giriş
-            </button>
             <button
               onClick={() => onNavigate("login")}
               className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 shadow-sm transition-all hover:border-slate-300 hover:shadow-md"
@@ -385,7 +439,7 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
         </div>
       </nav>
 
-      <main>
+      <main className="pt-[76px]">
         <section className="relative overflow-hidden bg-gradient-to-b from-white via-sky-50/60 to-[#f7f9fc] px-4 py-14 sm:px-6 sm:py-20 lg:px-10 lg:py-24">
           <div className="absolute left-0 top-10 h-72 w-72 rounded-full bg-blue-100/70 blur-3xl" />
           <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-amber-100/70 blur-3xl" />
@@ -402,7 +456,9 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
               </h2>
 
               <p className="mx-auto mt-6 max-w-2xl text-base font-semibold leading-8 text-slate-600 sm:text-lg lg:mx-0">
-                LastikOtelim; müşteri, araç, lastik seti, depo/raf konumu ve etiket yazdırma işlemlerini sade bir panelde toplar. Yoğun sezonda karışıklığı azaltır, teslim sürecini hızlandırır.
+                LastikOtelim; müşteri, araç, lastik seti, depo/raf konumu ve etiket
+                yazdırma işlemlerini sade bir panelde toplar. Yoğun sezonda karışıklığı
+                azaltır, teslim sürecini hızlandırır.
               </p>
 
               <div className="mt-8 flex flex-col gap-3 sm:mx-auto sm:max-w-md sm:flex-row lg:mx-0 lg:max-w-none">
@@ -413,10 +469,10 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
                   Hemen Başla <ArrowRight className="h-5 w-5" />
                 </button>
                 <button
-                  onClick={onDemoLogin}
+                  onClick={() => onNavigate("login")}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-sm font-black text-slate-800 shadow-sm transition-all hover:border-slate-300 hover:shadow-md active:scale-95"
                 >
-                  <Play className="h-4 w-4 fill-slate-800" /> Demo Hesaba Gir
+                  Giriş Yap
                 </button>
               </div>
 
@@ -427,8 +483,12 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
                   [BadgeCheck, "Düzenli depo"]
                 ].map(([Icon, label]) => {
                   const MiniIcon = Icon as typeof ShieldCheck;
+
                   return (
-                    <div key={label as string} className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-700 shadow-sm lg:justify-start">
+                    <div
+                      key={label as string}
+                      className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-700 shadow-sm lg:justify-start"
+                    >
                       <MiniIcon className="h-4 w-4 text-blue-600" />
                       {label as string}
                     </div>
@@ -445,13 +505,19 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
           <div className="mx-auto grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {targets.map((target) => {
               const TargetIcon = target.icon;
+
               return (
-                <div key={target.name} className="rounded-3xl border border-slate-100 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-slate-200/80">
+                <div
+                  key={target.name}
+                  className="rounded-3xl border border-slate-100 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-slate-200/80"
+                >
                   <div className="mb-4 grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-700">
                     <TargetIcon className="h-5 w-5" />
                   </div>
                   <h3 className="text-base font-black text-slate-950">{target.name}</h3>
-                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{target.desc}</p>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+                    {target.desc}
+                  </p>
                 </div>
               );
             })}
@@ -461,20 +527,27 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
         <section id="features" className="bg-[#f7f9fc] px-4 py-16 sm:px-6 sm:py-24 lg:px-10">
           <div className="mx-auto max-w-7xl">
             <div className="mx-auto mb-12 max-w-3xl text-center">
-              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">Özellikler</span>
+              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">
+                Özellikler
+              </span>
               <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-5xl">
                 Lastikçilerin günlük iş akışına göre tasarlandı.
               </h3>
               <p className="mt-4 text-sm font-semibold leading-7 text-slate-500 sm:text-base">
-                Karmaşık ekranlar yerine, dükkan içinde gerçekten ihtiyaç duyulan işlemler öne çıkarıldı.
+                Karmaşık ekranlar yerine, dükkan içinde gerçekten ihtiyaç duyulan işlemler
+                öne çıkarıldı.
               </p>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {features.map((feature) => {
                 const FeatureIcon = feature.icon;
+
                 return (
-                  <div key={feature.title} className="group rounded-[1.75rem] border border-slate-200/70 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-950/5">
+                  <div
+                    key={feature.title}
+                    className="group rounded-[1.75rem] border border-slate-200/70 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-950/5"
+                  >
                     <div className="mb-5 flex items-center justify-between gap-4">
                       <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-50 text-blue-600 ring-1 ring-slate-100 transition-all group-hover:bg-blue-600 group-hover:text-white">
                         <FeatureIcon className="h-5 w-5" />
@@ -482,7 +555,9 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
                       <ArrowRight className="h-5 w-5 text-slate-300 transition-all group-hover:translate-x-1 group-hover:text-blue-500" />
                     </div>
                     <h4 className="text-lg font-black text-slate-950">{feature.title}</h4>
-                    <p className="mt-2 text-sm font-semibold leading-7 text-slate-500">{feature.desc}</p>
+                    <p className="mt-2 text-sm font-semibold leading-7 text-slate-500">
+                      {feature.desc}
+                    </p>
                   </div>
                 );
               })}
@@ -494,28 +569,39 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
           <div className="mx-auto max-w-7xl">
             <div className="grid items-start gap-12 lg:grid-cols-[0.85fr_1.15fr]">
               <div className="lg:sticky lg:top-28">
-                <span className="text-[11px] font-black uppercase tracking-[0.18em] text-amber-600">İş Akışı</span>
+                <span className="text-[11px] font-black uppercase tracking-[0.18em] text-amber-600">
+                  İş Akışı
+                </span>
                 <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-5xl">
                   Dükkan temposuna uygun basit kayıt akışı.
                 </h3>
                 <p className="mt-4 text-sm font-semibold leading-7 text-slate-500 sm:text-base">
-                  Müşteri geldiğinde kayıt açın, lastik setini tanımlayın, raf konumunu girin ve LastikCode etiketiyle fiziksel takibi tamamlayın.
+                  Müşteri geldiğinde kayıt açın, lastik setini tanımlayın, raf konumunu
+                  girin ve LastikCode etiketiyle fiziksel takibi tamamlayın.
                 </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 {workflow.map((item, index) => {
                   const WorkflowIcon = item.icon;
+
                   return (
-                    <div key={item.title} className="relative rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/60">
+                    <div
+                      key={item.title}
+                      className="relative rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/60"
+                    >
                       <div className="mb-8 flex items-center justify-between">
                         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-blue-700">
                           <WorkflowIcon className="h-5 w-5" />
                         </div>
-                        <span className="text-4xl font-black text-slate-100">0{index + 1}</span>
+                        <span className="text-4xl font-black text-slate-100">
+                          0{index + 1}
+                        </span>
                       </div>
                       <h4 className="text-lg font-black text-slate-950">{item.title}</h4>
-                      <p className="mt-2 text-sm font-semibold leading-7 text-slate-500">{item.desc}</p>
+                      <p className="mt-2 text-sm font-semibold leading-7 text-slate-500">
+                        {item.desc}
+                      </p>
                     </div>
                   );
                 })}
@@ -527,12 +613,15 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
         <section id="pricing" className="bg-white px-4 py-16 sm:px-6 sm:py-24 lg:px-10">
           <div className="mx-auto max-w-7xl">
             <div className="mx-auto mb-12 max-w-3xl text-center">
-              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">Fiyatlandırma</span>
+              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">
+                Fiyatlandırma
+              </span>
               <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-5xl">
                 İşletmenizin büyüklüğüne göre 3 net paket.
               </h3>
               <p className="mt-4 text-sm font-semibold leading-7 text-slate-500 sm:text-base">
-                Demo hesap geliştirme/test amaçlıdır; fiyatlandırma gerçek kullanım paketleri üzerinden hazırlanmıştır.
+                Küçük işletmelerden yoğun kayıt hacmine sahip profesyonel servislere
+                kadar farklı ihtiyaçlara uygun paketler sunulur.
               </p>
             </div>
 
@@ -554,18 +643,27 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
 
                   <div className="flex-1">
                     <h4 className="text-xl font-black text-slate-950">{plan.name}</h4>
-                    <p className="mt-3 text-sm font-semibold leading-7 text-slate-500">{plan.desc}</p>
+                    <p className="mt-3 text-sm font-semibold leading-7 text-slate-500">
+                      {plan.desc}
+                    </p>
 
                     <div className="mt-6 flex items-end gap-2">
-                      <span className="text-4xl font-black tracking-tight text-slate-950">{plan.price}</span>
-                      <span className="pb-1 text-sm font-black text-slate-400">/ {plan.period}</span>
+                      <span className="text-4xl font-black tracking-tight text-slate-950">
+                        {plan.price}
+                      </span>
+                      <span className="pb-1 text-sm font-black text-slate-400">
+                        / {plan.period}
+                      </span>
                     </div>
 
                     <div className="my-6 h-px bg-slate-100" />
 
                     <ul className="space-y-3">
                       {plan.features.map((feature) => (
-                        <li key={feature} className="flex gap-3 text-sm font-bold leading-6 text-slate-600">
+                        <li
+                          key={feature}
+                          className="flex gap-3 text-sm font-bold leading-6 text-slate-600"
+                        >
                           <Check className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
                           <span>{feature}</span>
                         </li>
@@ -592,23 +690,36 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
         <section id="faq" className="bg-gradient-to-b from-white to-slate-50 px-4 py-16 sm:px-6 sm:py-24 lg:px-10">
           <div className="mx-auto max-w-4xl">
             <div className="mb-10 text-center">
-              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">SSS</span>
-              <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Sıkça Sorulan Sorular</h3>
+              <span className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">
+                SSS
+              </span>
+              <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                Sıkça Sorulan Sorular
+              </h3>
             </div>
 
             <div className="space-y-4">
               {faqs.map((faq, index) => {
                 const isOpen = activeFaq === index;
+
                 return (
-                  <div key={faq.q} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                  <div
+                    key={faq.q}
+                    className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                  >
                     <button
                       onClick={() => toggleFaq(index)}
                       className="flex w-full items-center justify-between gap-4 p-5 text-left text-sm font-black text-slate-950 transition-colors hover:bg-slate-50 sm:text-base"
                       aria-expanded={isOpen}
                     >
                       <span>{faq.q}</span>
-                      {isOpen ? <ChevronUp className="h-5 w-5 shrink-0 text-slate-400" /> : <ChevronDown className="h-5 w-5 shrink-0 text-slate-400" />}
+                      {isOpen ? (
+                        <ChevronUp className="h-5 w-5 shrink-0 text-slate-400" />
+                      ) : (
+                        <ChevronDown className="h-5 w-5 shrink-0 text-slate-400" />
+                      )}
                     </button>
+
                     {isOpen && (
                       <div className="border-t border-slate-100 px-5 pb-5 pt-4 text-sm font-semibold leading-7 text-slate-500">
                         {faq.a}
@@ -624,12 +735,18 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
         <section className="bg-blue-600 px-4 py-14 text-white sm:px-6 lg:px-10">
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-8 text-center lg:flex-row lg:text-left">
             <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-100">LastikOtelim</p>
-              <h3 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">Lastik saklama karmaşasını bugün sadeleştirin.</h3>
+              <p className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-100">
+                LastikOtelim
+              </p>
+              <h3 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
+                Lastik saklama karmaşasını bugün sadeleştirin.
+              </h3>
               <p className="mt-3 max-w-2xl text-sm font-semibold leading-7 text-blue-100">
-                İşletmenizi daha düzenli, daha hızlı ve daha güvenilir bir takip sistemine taşıyın.
+                İşletmenizi daha düzenli, daha hızlı ve daha güvenilir bir takip
+                sistemine taşıyın.
               </p>
             </div>
+
             <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
               <button
                 onClick={() => onNavigate("register")}
@@ -638,10 +755,10 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
                 Kayıt Ol
               </button>
               <button
-                onClick={onDemoLogin}
+                onClick={() => onNavigate("login")}
                 className="rounded-2xl border border-white/30 bg-white/10 px-7 py-4 text-sm font-black text-white backdrop-blur transition-all hover:bg-white/20 active:scale-95"
               >
-                Demo İncele
+                Giriş Yap
               </button>
             </div>
           </div>
@@ -654,19 +771,35 @@ export default function LandingPage({ onNavigate, onDemoLogin }: LandingPageProp
             <LogoMark />
             <div>
               <p className="text-sm font-black text-slate-950">LastikOtelim</p>
-              <p className="mt-0.5 text-xs font-bold text-slate-400">Lastik saklama ve depo takip sistemi</p>
+              <p className="mt-0.5 text-xs font-bold text-slate-400">
+                Lastik saklama ve depo takip sistemi
+              </p>
             </div>
           </div>
 
           <div className="flex flex-wrap justify-center gap-5 text-xs font-black text-slate-500">
-            <a href="#features" className="transition-colors hover:text-blue-700">Özellikler</a>
-            <a href="#workflow" className="transition-colors hover:text-blue-700">İş Akışı</a>
-            <a href="#pricing" className="transition-colors hover:text-blue-700">Fiyatlandırma</a>
-            <a href="#faq" className="transition-colors hover:text-blue-700">SSS</a>
+            <a href="#features" className="transition-colors hover:text-blue-700">
+              Özellikler
+            </a>
+            <a href="#workflow" className="transition-colors hover:text-blue-700">
+              İş Akışı
+            </a>
+            <a href="#pricing" className="transition-colors hover:text-blue-700">
+              Fiyatlandırma
+            </a>
+            <a href="#faq" className="transition-colors hover:text-blue-700">
+              SSS
+            </a>
           </div>
 
           <p className="text-xs font-bold text-slate-400">
-            © 2026 LastikOtelim. <a href="https://teggsoft.com" className="text-slate-600 hover:text-blue-700">TeggSoft</a>
+            © 2026 LastikOtelim.{" "}
+            <a
+              href="https://teggsoft.com"
+              className="text-slate-600 hover:text-blue-700"
+            >
+              TeggSoft
+            </a>
           </p>
         </div>
       </footer>

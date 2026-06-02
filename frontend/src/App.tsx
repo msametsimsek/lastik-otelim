@@ -335,7 +335,6 @@ const handleLogout = async () => {
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <LandingPage
           onNavigate={(view) => setCurrentView(view)}
-          onDemoLogin={() => setCurrentView("login")}
         />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </div>
