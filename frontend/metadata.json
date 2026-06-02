@@ -1,0 +1,6 @@
+{
+  "name": "Lastik Takip",
+  "description": "Lastik emanet, depo kayıt ve etiket takip sistemi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
