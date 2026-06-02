@@ -90,7 +90,7 @@ export default function AppLayout({
   }, [showMobileSidebar]);
 
   return (
-    <div className="h-screen max-h-screen w-screen bg-slate-50/50 flex flex-col md:flex-row text-slate-900 font-sans overflow-hidden">
+    <div className="min-h-dvh w-full bg-slate-50/50 flex flex-col md:flex-row text-slate-900 font-sans overflow-x-hidden md:h-dvh md:overflow-hidden">
       {/* Mobile Top Bar */}
       <header className="md:hidden bg-white border-b border-slate-200 flex items-center justify-between px-5 py-4 mt-0 shrink-0 select-none z-30 sticky top-0 no-print">
         <div className="flex items-center gap-3 min-w-0">
@@ -219,7 +219,7 @@ export default function AppLayout({
                 LastikOtelim {APP_VERSION}
               </p>
               <p className="text-[9px] text-slate-300 font-medium mt-0.5">
-                TeggSoft Creative Systems
+                TeggSoft Creative Agency
               </p>
             </div>
           </div>

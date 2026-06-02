@@ -86,3 +86,43 @@ body {
     display: none !important;
   }
 }
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+input,
+textarea,
+select {
+  font-size: 16px;
+}
+
+@media (min-width: 768px) {
+
+  input,
+  textarea,
+  select {
+    font-size: inherit;
+  }
+}

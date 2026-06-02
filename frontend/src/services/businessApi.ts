@@ -14,7 +14,6 @@ export interface BusinessApiResponse {
 }
 
 export interface UpdateBusinessPayload {
-  id: number;
   name: string;
   address: string;
   phone: string;
@@ -79,31 +78,10 @@ async function businessRequest<T>(
   return data as T;
 }
 
-export function getStoredBusinessId(): number {
-  const rawBusinessId = localStorage.getItem("businessId");
-
-  if (!rawBusinessId) {
-    throw new Error("İşletme ID bilgisi bulunamadı.");
-  }
-
-  const businessId = Number(rawBusinessId);
-
-  if (!Number.isFinite(businessId) || businessId <= 0) {
-    throw new Error("İşletme ID bilgisi geçersiz.");
-  }
-
-  return businessId;
-}
-
-export async function getBusinessById(
-  businessId = getStoredBusinessId()
-): Promise<BusinessApiResponse> {
-  return businessRequest<BusinessApiResponse>(
-    `/Business/GetById?Id=${encodeURIComponent(String(businessId))}`,
-    {
-      method: "GET"
-    }
-  );
+export async function getBusinessById(): Promise<BusinessApiResponse> {
+  return businessRequest<BusinessApiResponse>("/Business/Get", {
+    method: "GET"
+  });
 }
 
 export async function updateBusiness(
@@ -115,7 +93,6 @@ export async function updateBusiness(
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      id: payload.id,
       name: payload.name,
       address: payload.address,
       phone: payload.phone,

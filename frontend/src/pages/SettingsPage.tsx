@@ -1,21 +1,13 @@
 import React, { useEffect, useState } from "react";
-import {
-  HardDrive,
-  Loader2,
-  RefreshCw,
-  Save,
-  Settings,
-  ShieldAlert,
-  Trash2
-} from "lucide-react";
-import { AppSettings } from "../types";
+import { HardDrive, Loader2, Mail, Save, Settings } from "lucide-react";
+import type { AppSettings } from "../types";
 import { StorageService } from "../services/storageService";
 import {
-  BusinessApiResponse,
   getBusinessById,
   mapBusinessToSettings,
   updateBusiness
 } from "../services/businessApi";
+import type { BusinessApiResponse } from "../services/businessApi";
 
 interface SettingsPageProps {
   onResetDatabase: () => void;
@@ -23,15 +15,37 @@ interface SettingsPageProps {
   onSaveSuccess?: () => void;
 }
 
+type StoredUser = {
+  email?: string;
+  Email?: string;
+  mail?: string;
+  Mail?: string;
+};
+
+const DEFAULT_BUSINESS_TYPE = "Oto Lastik & Servis";
+
+function getAccountEmailFromLocalStorage() {
+  try {
+    const rawUser = localStorage.getItem("user");
+
+    if (!rawUser) return "";
+
+    const user = JSON.parse(rawUser) as StoredUser;
+
+    return user.email || user.Email || user.mail || user.Mail || "";
+  } catch {
+    return "";
+  }
+}
+
 export default function SettingsPage({
-  onResetDatabase,
   showToast,
   onSaveSuccess
 }: SettingsPageProps) {
-  const [businessId, setBusinessId] = useState<number | null>(null);
   const [businessSlug, setBusinessSlug] = useState("");
   const [uploadFileId, setUploadFileId] = useState<number | null>(null);
 
+  const [accountEmail, setAccountEmail] = useState("");
   const [businessName, setBusinessName] = useState("");
   const [businessType, setBusinessType] = useState("");
   const [phone, setPhone] = useState("");
@@ -39,7 +53,6 @@ export default function SettingsPage({
 
   const [isLoadingBusiness, setIsLoadingBusiness] = useState(true);
   const [isSavingBusiness, setIsSavingBusiness] = useState(false);
-  const [showConfirmReset, setShowConfirmReset] = useState(false);
 
   const applyBusinessToForm = (
     business: BusinessApiResponse,
@@ -47,10 +60,9 @@ export default function SettingsPage({
   ) => {
     const syncedSettings = mapBusinessToSettings(
       business,
-      fallbackBusinessType || "Oto Lastik & Servis"
+      fallbackBusinessType || DEFAULT_BUSINESS_TYPE
     );
 
-    setBusinessId(business.id);
     setBusinessSlug(business.slug || "");
     setUploadFileId(business.uploadFileId ?? null);
 
@@ -71,6 +83,7 @@ export default function SettingsPage({
     const loadBusinessSettings = async () => {
       const localConfig = StorageService.getSettings();
 
+      setAccountEmail(getAccountEmailFromLocalStorage());
       setBusinessName(localConfig.businessName);
       setBusinessType(localConfig.businessType);
       setPhone(localConfig.phone);
@@ -92,7 +105,11 @@ export default function SettingsPage({
         if (!isMounted) return;
 
         console.warn("İşletme bilgileri API'den alınamadı:", error);
-        showToast("İşletme bilgileri API'den alınamadı. Local bilgiler gösteriliyor.", "warning");
+
+        showToast(
+          "İşletme bilgileri API'den alınamadı. Local bilgiler gösteriliyor.",
+          "warning"
+        );
       } finally {
         if (isMounted) {
           setIsLoadingBusiness(false);
@@ -115,16 +132,10 @@ export default function SettingsPage({
       return;
     }
 
-    if (!businessId) {
-      showToast("İşletme ID bilgisi bulunamadı. Lütfen tekrar giriş yapın.", "error");
-      return;
-    }
-
     try {
       setIsSavingBusiness(true);
 
       const updatedBusiness = await updateBusiness({
-        id: businessId,
         name: businessName.trim(),
         address: address.trim(),
         phone: phone.trim(),
@@ -133,12 +144,11 @@ export default function SettingsPage({
 
       const updatedConfig: AppSettings = {
         businessName: updatedBusiness.name || businessName.trim(),
-        businessType: businessType.trim() || "Oto Lastik & Servis",
+        businessType: businessType.trim() || DEFAULT_BUSINESS_TYPE,
         phone: updatedBusiness.phone || phone.trim(),
         address: updatedBusiness.address || address.trim()
       };
 
-      setBusinessId(updatedBusiness.id);
       setBusinessSlug(updatedBusiness.slug || "");
       setUploadFileId(updatedBusiness.uploadFileId ?? null);
 
@@ -171,35 +181,18 @@ export default function SettingsPage({
     }
   };
 
-  const handleConfirmReset = () => {
-    try {
-      onResetDatabase();
-
-      const config = StorageService.getSettings();
-
-      setBusinessName(config.businessName);
-      setBusinessType(config.businessType);
-      setPhone(config.phone);
-      setAddress(config.address);
-
-      setShowConfirmReset(false);
-      showToast("Tüm local veriler başarıyla temizlendi.", "success");
-    } catch {
-      showToast("Sıfırlama başarısız oldu.", "error");
-    }
-  };
-
   return (
     <div className="max-w-3xl space-y-6 text-zinc-800 animate-slide-in">
-      <div className="bg-white p-5 rounded-2xl border border-zinc-100 shadow-3xs">
+      <section className="bg-white p-5 rounded-2xl border border-zinc-100 shadow-3xs">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold tracking-tight text-zinc-900 flex items-center gap-2">
               <Settings className="w-5.5 h-5.5 text-blue-600 animate-spin-slow" />
               İşletme &amp; Sistem Ayarları
             </h2>
+
             <p className="text-xs text-zinc-500 mt-1">
-              İşletme bilgilerini, makbuz künye alanlarını ve sistem ayarlarını yönetin.
+              İşletmenize ait temel bilgileri görüntüleyin ve güncelleyin.
             </p>
           </div>
 
@@ -217,20 +210,44 @@ export default function SettingsPage({
             <span className="font-semibold text-zinc-600">{businessSlug}</span>
           </p>
         )}
-      </div>
+      </section>
 
-      <div className="bg-white rounded-2xl border border-zinc-100 shadow-3xs p-6 space-y-5">
-        <h3 className="text-sm font-bold text-zinc-900 border-b pb-2 border-zinc-50 flex items-center gap-1.5 uppercase">
-          <HardDrive className="w-4.5 h-4.5 text-blue-500" />
-          Fatura / Makbuz Künye Bilgileri
-        </h3>
+      <section className="bg-white rounded-2xl border border-zinc-100 shadow-3xs p-6 space-y-5">
+        <div className="border-b pb-2 border-zinc-50">
+          <h3 className="text-sm font-bold text-zinc-900 flex items-center gap-1.5 uppercase">
+            <HardDrive className="w-4.5 h-4.5 text-blue-500" />
+            İşletme Bilgileri
+          </h3>
+        </div>
 
         <form onSubmit={handleSaveSettings} className="space-y-4 text-xs font-sans">
+          <div>
+            <label className="block text-xs font-semibold text-zinc-700 mb-1">
+              Kayıtlı Hesap E-postası
+            </label>
+
+            <div className="relative">
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+
+              <input
+                type="email"
+                value={accountEmail || "E-posta bilgisi bulunamadı"}
+                disabled
+                className="w-full pl-10 pr-3.5 py-2.5 bg-zinc-100 border border-zinc-200 rounded-lg text-sm text-zinc-500 cursor-not-allowed outline-none"
+              />
+            </div>
+
+            <p className="mt-1.5 text-[11px] text-zinc-400 leading-relaxed">
+              Bu e-posta hesaba giriş yapmak için kullanılır. Şimdilik bu alandan değiştirilemez.
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 İşletme Adı *
               </label>
+
               <input
                 type="text"
                 required
@@ -245,6 +262,7 @@ export default function SettingsPage({
               <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 Hizmet Türü / Altyazı
               </label>
+
               <input
                 type="text"
                 value={businessType}
@@ -258,6 +276,7 @@ export default function SettingsPage({
               <label className="block text-xs font-semibold text-zinc-700 mb-1">
                 İşletme Telefon No *
               </label>
+
               <input
                 type="text"
                 required
@@ -271,8 +290,9 @@ export default function SettingsPage({
 
           <div>
             <label className="block text-xs font-semibold text-zinc-700 mb-1">
-              Fiziksel Mağaza Adresi *
+              İşletme Adresi *
             </label>
+
             <textarea
               required
               rows={3}
@@ -301,74 +321,7 @@ export default function SettingsPage({
             )}
           </button>
         </form>
-      </div>
-
-      <div className="bg-rose-50/50 border border-rose-100 rounded-2xl p-6 shadow-3xs space-y-4">
-        <div className="flex items-center gap-2 text-rose-800">
-          <ShieldAlert className="w-5.5 h-5.5" />
-          <h3 className="font-bold text-sm uppercase">
-            Sistem Temizleme (Tehlikeli Alan)
-          </h3>
-        </div>
-
-        <p className="text-xs text-rose-900/65 leading-relaxed">
-          Aşağıdaki buton tarayıcınızda kayıtlı olan tüm müşterileri, plakaları,
-          çekilen lastik fotoğraflarını ve emanet fişlerini kalıcı olarak siler.
-          Bu işlem geri alınamaz.
-        </p>
-
-        <button
-          type="button"
-          onClick={() => setShowConfirmReset(true)}
-          className="flex items-center gap-1.5 px-4.5 py-2 bg-rose-600 hover:bg-rose-700 transition-colors text-white font-bold text-xs rounded-lg shadow-md cursor-pointer"
-        >
-          <Trash2 className="w-4 h-4" />
-          Tüm LocalStorage Veritabanını Sıfırla
-        </button>
-      </div>
-
-      {showConfirmReset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/60 backdrop-blur-xs">
-          <div
-            className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border border-rose-100 p-6 space-y-4 animate-slide-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-center space-y-2">
-              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
-                <ShieldAlert className="w-6 h-6 animate-bounce" />
-              </div>
-
-              <h4 className="font-bold text-zinc-950 text-sm">
-                Veriler Silinecektir! Onaylıyor musunuz?
-              </h4>
-
-              <p className="text-xs text-zinc-500 leading-relaxed">
-                Bu dükkanda kaydettiğiniz tüm teslimatlar, araç sahipleri,
-                konum rafları ve görseller geri getirilmeyecek şekilde silinecektir.
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 text-xs font-sans">
-              <button
-                type="button"
-                onClick={() => setShowConfirmReset(false)}
-                className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-semibold rounded-lg"
-              >
-                Vazgeç / İptal
-              </button>
-
-              <button
-                type="button"
-                onClick={handleConfirmReset}
-                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg flex items-center gap-1 shadow-sm"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Evet, Tamamen Sil
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </section>
     </div>
   );
 }

@@ -5,7 +5,7 @@
   </p>
 
   <p>
-    <strong>TeggSoft Creative Systems</strong> tarafından geliştirilmiştir.
+    <strong>TeggSoft Creative Agency</strong> tarafından geliştirilmiştir.
   </p>
 </div>
 
