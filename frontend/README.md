@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>LastikTakip</h1>
+  <h1>LastikOtelim</h1>
   <p>
     Lastikçiler için müşteri, araç, lastik emaneti, depo konumu ve etiket yazdırma yönetim sistemi.
   </p>
@@ -13,7 +13,7 @@
 
 ## Proje Hakkında
 
-**LastikTakip**, lastikçiler için geliştirilen modern, sade ve kullanımı kolay bir takip sistemidir.
+**LastikOtelim**, lastikçiler için geliştirilen modern, sade ve kullanımı kolay bir takip sistemidir.
 
 Bu sistem; müşteri bilgilerini, araç plakalarını, lastik emanet kayıtlarını, depo konumlarını ve etiket yazdırma süreçlerini tek panel üzerinden yönetmeyi amaçlar.
 

@@ -172,7 +172,7 @@ export default function DashboardPage({
                   ? `Aboneliğiniz aktif. Yenileme tarihi: ${formatSubscriptionDate(
                       subscription.renewalDate
                     )}`
-                  : "LastikTakip’i tam kapasite kullanmak için işletmenize uygun bir abonelik planı seçin."}
+                  : "LastikOtelim’i tam kapasite kullanmak için işletmenize uygun bir abonelik planı seçin."}
               </p>
             </div>
           </div>

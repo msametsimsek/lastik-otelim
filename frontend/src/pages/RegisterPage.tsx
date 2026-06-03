@@ -154,7 +154,7 @@ export default function RegisterPage({ onNavigate, onRegisterSuccess, showToast 
               <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white">
                 <Tag className="w-4.5 h-4.5" />
               </div>
-              <span className="font-bold text-base tracking-tight select-none">LastikTakip</span>
+              <span className="font-bold text-base tracking-tight select-none">LastikOtelim</span>
             </div>
 
             <div className="pt-8">

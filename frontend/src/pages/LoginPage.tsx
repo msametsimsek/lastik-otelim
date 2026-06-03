@@ -81,7 +81,7 @@ export default function LoginPage({
                 <Tag className="w-4.5 h-4.5" />
               </div>
               <span className="font-bold text-base tracking-tight select-none">
-                LastikTakip
+                LastikOtelim
               </span>
             </div>
 

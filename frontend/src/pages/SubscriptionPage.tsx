@@ -670,7 +670,7 @@ export default function SubscriptionPage({
           </div>
 
           <h1 className="mt-4 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
-            LastikTakip Abonelik Planı
+            LastikOtelim Abonelik Planı
           </h1>
 
           <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-slate-500">
@@ -795,7 +795,7 @@ export default function SubscriptionPage({
                 </p>
 
                 <h2 className="mt-1 text-xl font-black">
-                  LastikTakip’i tam kapasite kullanmaya başlayın
+                    LastikOtelim’i tam kapasite kullanmaya başlayın
                 </h2>
 
                 <p className="mt-2 max-w-2xl text-sm font-semibold leading-relaxed text-blue-100">

@@ -10,15 +10,15 @@ import {
 import { DEFAULT_BRANDS } from "../data/defaultBrands";
 
 const KEYS = {
-  CUSTOMERS: "lastikTakip_customers",
-  VEHICLES: "lastikTakip_vehicles",
-  TIRE_RECORDS: "lastikTakip_tireRecords",
-  BRANDS: "lastikTakip_brands",
-  SETTINGS: "lastikTakip_settings",
-  PRINT_COUNTER: "lastikTakip_printCounter",
-  USERS: "lastikTakip_users",
-  SESSION: "lastikTakip_session",
-  SUBSCRIPTION: "lastikTakip_subscription"
+  CUSTOMERS: "lastikOtelim_customers",
+  VEHICLES: "lastikOtelim_vehicles",
+  TIRE_RECORDS: "lastikOtelim_tireRecords",
+  BRANDS: "lastikOtelim_brands",
+  SETTINGS: "lastikOtelim_settings",
+  PRINT_COUNTER: "lastikOtelim_printCounter",
+  USERS: "lastikOtelim_users",
+  SESSION: "lastikOtelim_session",
+  SUBSCRIPTION: "lastikOtelim_subscription"
 };
 
 const DEFAULT_SETTINGS: AppSettings = {

@@ -137,7 +137,7 @@ export default function AppLayout({
 
             <div className="min-w-0">
               <h1 className="font-sans font-black text-lg tracking-tight text-slate-800 leading-tight">
-                LastikTakip
+                LastikOtelim
               </h1>
               <p
                 className="text-[10px] text-slate-400 font-semibold mt-0.5 uppercase tracking-wide truncate max-w-[160px]"
