@@ -21,6 +21,8 @@ export type TirePhoto = {
   name: string;
   type: string;
   dataUrl: string;
+  fileId?: number;
+  fileUrl?: string;
 };
 
 export type TireType = "Yazlık" | "Kışlık" | "4 Mevsim";

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+
 import AppLayout from "./components/layout/AppLayout";
 import DashboardPage from "./pages/DashboardPage";
 import RecordsPage from "./pages/RecordsPage";
@@ -32,6 +33,7 @@ import {
 
 import { StorageService } from "./services/storageService";
 import { getBusinessById, mapBusinessToSettings } from "./services/businessApi";
+import { buildFilePublicUrl } from "./services/fileApi";
 import { generateId, normalizeTurkish } from "./utils/helpers";
 
 import {
@@ -81,6 +83,53 @@ function mapApiVehicleToVehicle(item: VehicleListItemDto): Vehicle {
     note: item.note || "",
     createdAt: item.createdDate
   };
+}
+
+function getSafeFileUrl(file: Record<string, unknown>) {
+  if (typeof file.fileUrl === "string" && file.fileUrl.trim()) {
+    return file.fileUrl;
+  }
+
+  if (typeof file.url === "string" && file.url.trim()) {
+    return file.url;
+  }
+
+  if (typeof file.filePath === "string" && file.filePath.trim()) {
+    return file.filePath;
+  }
+
+  return "";
+}
+
+function getSafeFileName(file: Record<string, unknown>) {
+  if (typeof file.fileName === "string" && file.fileName.trim()) {
+    return file.fileName;
+  }
+
+  if (typeof file.orginalName === "string" && file.orginalName.trim()) {
+    return file.orginalName;
+  }
+
+  if (typeof file.originalName === "string" && file.originalName.trim()) {
+    return file.originalName;
+  }
+
+  return "lastik-gorseli";
+}
+
+function getSafeFileId(file: Record<string, unknown>) {
+  const rawFileId = file.fileId ?? file.id;
+
+  if (typeof rawFileId === "number") {
+    return rawFileId;
+  }
+
+  if (typeof rawFileId === "string") {
+    const parsed = Number(rawFileId);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
 }
 
 function mapApiTireToRecord(
@@ -133,18 +182,41 @@ function mapApiTireToRecord(
       ? matchedApiVehicle.note.trim()
       : matchedVehicle?.note || "";
 
+  const photos =
+    matchedApiVehicle?.uploadFiles?.map((file) => {
+      const rawFile = file as Record<string, unknown>;
+      const fileId = getSafeFileId(rawFile);
+      const fileUrl = getSafeFileUrl(rawFile);
+      const fileName = getSafeFileName(rawFile);
+
+      return {
+        id: String(fileId || generateId()),
+        fileId: fileId || undefined,
+        name: fileName,
+        type: "image/*",
+        dataUrl: buildFilePublicUrl(fileUrl),
+        fileUrl
+      };
+    }) || [];
+
+  const tireCode = item.code || `LT-${item.id}`;
+  const tireType = item.brandConstantName || "Yazlık";
+  const brand = item.modelConstantName || "Belirtilmedi";
+  const size = item.sizes || "Belirtilmedi";
+  const quantity = item.count || 0;
+
   return {
     id: String(item.id),
     customerId: matchedVehicle?.customerId || matchedCustomer?.id || "",
     vehicleId: String(item.vehicleId),
-    tireCode: item.code || `LT-${item.id}`,
-    tireType: item.brandConstantName || "Yazlık",
-    brand: item.modelConstantName || "Belirtilmedi",
-    size: item.sizes || "Belirtilmedi",
-    quantity: item.count || 0,
+    tireCode,
+    tireType,
+    brand,
+    size,
+    quantity,
     storageLocation,
     vehicleNote,
-    photos: [],
+    photos,
     createdAt: item.createdDate,
     updatedAt: item.createdDate,
     status: "active",
@@ -152,6 +224,11 @@ function mapApiTireToRecord(
       customerName,
       phone: customerPhone,
       plate: vehiclePlate,
+      tireCode,
+      tireType,
+      brand,
+      size,
+      quantity,
       storageLocation,
       vehicleNote
     }

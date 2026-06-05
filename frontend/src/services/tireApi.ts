@@ -24,12 +24,32 @@ export interface GetListParams {
   searchKey?: string;
 }
 
+export interface UploadFileDetailDto {
+  id?: number;
+  fileName?: string;
+  fileUrl?: string;
+  fileSize?: number;
+  fileExtension?: string;
+  imageSize?: "thumb" | "small" | "medium" | "large" | string;
+  width?: number;
+  height?: number;
+  [key: string]: unknown;
+}
+
 export interface UploadFileDto {
   id?: number;
   fileId?: number;
+  orginalName?: string;
+  originalName?: string;
   fileName?: string;
   filePath?: string;
+  fileUrl?: string;
   url?: string;
+  fileSize?: number;
+  fileExtension?: string;
+  fileType?: string;
+  uploadDate?: string;
+  details?: UploadFileDetailDto[];
   [key: string]: unknown;
 }
 
@@ -52,7 +72,7 @@ export interface UpdateClientPayload {
   id: number;
   name: string;
   phone: string;
-  note: string | null;
+  note: string;
 }
 
 export interface VehicleListItemDto {
@@ -63,7 +83,7 @@ export interface VehicleListItemDto {
   clientName: string;
   createdDate: string;
   createdUsername: string;
-  uploadFiles: UploadFileDto[];
+  uploadFiles?: UploadFileDto[];
 }
 
 export interface CreateVehiclePayload {
@@ -76,7 +96,7 @@ export interface CreateVehiclePayload {
 export interface UpdateVehiclePayload {
   id: number;
   licensePlate: string;
-  note: string | null;
+  note: string;
   imageIds: number[];
 }
 
@@ -134,7 +154,7 @@ export interface UpdateTirePayload {
   brandConstantId: number;
   sizes: string;
   count: number;
-  storageLocation?: string;
+  storageLocation: string;
 }
 
 export const searchPlaceholders = {
@@ -160,6 +180,8 @@ function getErrorMessage(data: unknown) {
   const errorData = data as {
     message?: string;
     Message?: string;
+    error?: string;
+    Error?: string;
     title?: string;
     Title?: string;
     detail?: string;
@@ -169,6 +191,8 @@ function getErrorMessage(data: unknown) {
 
   if (errorData.message) return errorData.message;
   if (errorData.Message) return errorData.Message;
+  if (errorData.error) return errorData.error;
+  if (errorData.Error) return errorData.Error;
   if (errorData.title) return errorData.title;
   if (errorData.Title) return errorData.Title;
   if (errorData.detail) return errorData.detail;
@@ -176,7 +200,10 @@ function getErrorMessage(data: unknown) {
 
   if (errorData.errors) {
     const firstError = Object.values(errorData.errors).flat()[0];
-    if (firstError) return firstError;
+
+    if (firstError) {
+      return firstError;
+    }
   }
 
   return "İşlem tamamlanamadı.";
@@ -244,6 +271,10 @@ export const vehicleApi = {
     return request<PaginatedResponse<VehicleListItemDto>>(
       `/tire/Vehicle/GetList?${buildGetListQuery(params)}`
     );
+  },
+
+  getVehicleById(id: number) {
+    return request<VehicleListItemDto>(`/tire/Vehicle/GetById?id=${id}`);
   },
 
   addVehicle(payload: CreateVehiclePayload) {
