@@ -17,7 +17,7 @@ export interface AuthApiResponse {
   refreshToken: string;
 }
 
-interface RegisterPayload {
+export interface RegisterPayload {
   businessName: string;
   ownerName: string;
   email: string;
@@ -25,12 +25,19 @@ interface RegisterPayload {
   password: string;
 }
 
-interface LoginPayload {
+export interface LoginPayload {
   email: string;
   password: string;
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const RAW_API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "https://gateway.teggsoft.com"
+).replace(/\/$/, "");
+
+const API_BASE_URL = RAW_API_BASE_URL.endsWith("/tire")
+  ? RAW_API_BASE_URL.slice(0, -5)
+  : RAW_API_BASE_URL;
+
 let refreshRequest: Promise<AuthApiResponse> | null = null;
 
 function getApiErrorMessage(data: unknown) {
@@ -44,6 +51,9 @@ function getApiErrorMessage(data: unknown) {
     error?: string;
     Error?: string;
     title?: string;
+    Title?: string;
+    detail?: string;
+    Detail?: string;
     errors?: Record<string, string[]>;
   };
 
@@ -52,6 +62,9 @@ function getApiErrorMessage(data: unknown) {
   if (errorData.error) return errorData.error;
   if (errorData.Error) return errorData.Error;
   if (errorData.title) return errorData.title;
+  if (errorData.Title) return errorData.Title;
+  if (errorData.detail) return errorData.detail;
+  if (errorData.Detail) return errorData.Detail;
 
   if (errorData.errors) {
     const firstError = Object.values(errorData.errors).flat()[0];
@@ -62,10 +75,6 @@ function getApiErrorMessage(data: unknown) {
 }
 
 async function request<T>(endpoint: string, options: RequestInit): Promise<T> {
-  if (!API_BASE_URL) {
-    throw new Error("API adresi bulunamadı. frontend/.env içine VITE_API_BASE_URL ekleyin.");
-  }
-
   const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
   const data = await response.json().catch(() => null);
 
@@ -127,34 +136,6 @@ export function getRefreshToken() {
   return localStorage.getItem("refreshToken");
 }
 
-export async function revokeToken(): Promise<void> {
-  const accessToken = getAccessToken();
-  const refreshToken = getRefreshToken();
-
-  if (!accessToken || !refreshToken) {
-    return;
-  }
-
-  if (!API_BASE_URL) {
-    throw new Error("API adresi bulunamadı. frontend/.env içine VITE_API_BASE_URL ekleyin.");
-  }
-
-  const response = await fetch(`${API_BASE_URL}/Auth/RevokeToken`, {
-    method: "PUT",
-    headers: {
-      accept: "*/*",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`
-    },
-    body: JSON.stringify(refreshToken)
-  });
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(getApiErrorMessage(data));
-  }
-}
-
 export function clearAuthSession() {
   localStorage.removeItem("token");
   localStorage.removeItem("accessToken");
@@ -178,7 +159,7 @@ export function isAccessTokenExpired(bufferMs = 90_000) {
 }
 
 async function getAuthDetailWithToken(token: string): Promise<AuthApiUser> {
-  return request<AuthApiUser>("/Auth/Detail", {
+  return request<AuthApiUser>("/tire/Auth/Detail", {
     method: "GET",
     headers: {
       accept: "*/*",
@@ -204,7 +185,7 @@ export async function refreshAccessToken(): Promise<AuthApiResponse> {
   }
 
   refreshRequest = request<AuthApiResponse>(
-    `/Auth/RefreshToken?token=${encodeURIComponent(refreshToken)}`,
+    `/tire/Auth/RefreshToken?token=${encodeURIComponent(refreshToken)}`,
     {
       method: "GET",
       headers: {
@@ -293,10 +274,34 @@ export async function getAuthDetail(): Promise<AuthApiUser> {
   }
 }
 
+export async function revokeToken(): Promise<void> {
+  const accessToken = getAccessToken();
+  const refreshToken = getRefreshToken();
+
+  if (!accessToken || !refreshToken) {
+    return;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/tire/Auth/RevokeToken`, {
+    method: "PUT",
+    headers: {
+      accept: "*/*",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`
+    },
+    body: JSON.stringify(refreshToken)
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(data));
+  }
+}
+
 export async function registerBusiness(payload: RegisterPayload): Promise<AuthApiResponse> {
   const { firstName, lastName } = splitOwnerName(payload.ownerName);
 
-  return request<AuthApiResponse>("/Auth/Register", {
+  return request<AuthApiResponse>("/tire/Auth/Register", {
     method: "POST",
     headers: {
       accept: "*/*",
@@ -314,7 +319,7 @@ export async function registerBusiness(payload: RegisterPayload): Promise<AuthAp
 }
 
 export async function loginBusiness(payload: LoginPayload): Promise<AuthApiResponse> {
-  return request<AuthApiResponse>("/Auth/Login", {
+  return request<AuthApiResponse>("/tire/Auth/Login", {
     method: "POST",
     headers: {
       accept: "*/*",

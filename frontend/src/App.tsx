@@ -8,20 +8,16 @@ import SettingsPage from "./pages/SettingsPage";
 import SubscriptionPage from "./pages/SubscriptionPage";
 import RemindersPage from "./pages/RemindersPage";
 
-// Public SaaS routes
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 
-// Modals
 import TireRecordModal from "./components/modals/TireRecordModal";
 import TireRecordDetailModal from "./components/modals/TireRecordDetailModal";
 import PrintLabelModal from "./components/modals/PrintLabelModal";
 
-// Toast Notification
 import ToastContainer from "./components/ui/Toast";
 
-// Types & Services
 import {
   Customer,
   Vehicle,
@@ -33,8 +29,10 @@ import {
   AuthUser,
   UserSubscription
 } from "./types";
+
 import { StorageService } from "./services/storageService";
 import { generateId } from "./utils/helpers";
+
 import {
   AuthApiUser,
   clearAuthSession,
@@ -42,6 +40,15 @@ import {
   getStoredAuthUser,
   revokeToken
 } from "./services/authApi";
+
+import {
+  clientApi,
+  vehicleApi,
+  tireApi,
+  ClientListItemDto,
+  VehicleListItemDto,
+  TireListItemDto
+} from "./services/tireApi";
 
 function mapApiUserToAuthUser(user: AuthApiUser): AuthUser {
   return {
@@ -56,34 +63,127 @@ function mapApiUserToAuthUser(user: AuthApiUser): AuthUser {
   };
 }
 
+function mapApiClientToCustomer(item: ClientListItemDto): Customer {
+  return {
+    id: String(item.id),
+    fullName: item.name || "Bilinmeyen Cari",
+    phone: item.phone || "",
+    createdAt: item.createdDate
+  };
+}
+
+function mapApiVehicleToVehicle(item: VehicleListItemDto): Vehicle {
+  return {
+    id: String(item.id),
+    customerId: String(item.clientId),
+    plate: item.licensePlate || "-",
+    createdAt: item.createdDate
+  };
+}
+
+function mapApiTireToRecord(
+  item: TireListItemDto,
+  mappedCustomers: Customer[],
+  mappedVehicles: Vehicle[],
+  apiVehicles: VehicleListItemDto[]
+): TireRecord {
+  const matchedVehicle = mappedVehicles.find(
+    (vehicle) => vehicle.id === String(item.vehicleId)
+  );
+
+  const matchedApiVehicle = apiVehicles.find(
+    (vehicle) => vehicle.id === item.vehicleId
+  );
+
+  const matchedCustomer = matchedVehicle
+    ? mappedCustomers.find(
+        (customer) => customer.id === matchedVehicle.customerId
+      )
+    : undefined;
+
+  const cleanClientName =
+    item.clientName && item.clientName.trim() && item.clientName !== "string"
+      ? item.clientName
+      : "";
+
+  const customerName =
+    cleanClientName || matchedCustomer?.fullName || "Bilinmeyen Cari";
+
+  const customerPhone = matchedCustomer?.phone || "";
+  const vehiclePlate =
+    item.vehicleLicensePlate || matchedVehicle?.plate || "-";
+
+  return {
+    id: String(item.id),
+    customerId: matchedVehicle?.customerId || matchedCustomer?.id || "",
+    vehicleId: String(item.vehicleId),
+    tireCode: item.code || `LT-${item.id}`,
+    tireType: item.brandConstantName || "Yazlık",
+    brand: item.modelConstantName || "Belirtilmedi",
+    size: item.sizes || "Belirtilmedi",
+    quantity: item.count || 0,
+    storageLocation: matchedApiVehicle?.note || "",
+    photos: [],
+    createdAt: item.createdDate,
+    updatedAt: item.createdDate,
+    status: "active",
+    snapshot: {
+      customerName,
+      phone: customerPhone,
+      plate: vehiclePlate
+    }
+  } as TireRecord;
+}
+
+function getFallbackCustomer(record: TireRecord): Customer {
+  return {
+    id: record.customerId,
+    fullName: record.snapshot?.customerName || "Bilinmeyen Cari",
+    phone: record.snapshot?.phone || "",
+    createdAt: record.createdAt
+  };
+}
+
+function getFallbackVehicle(record: TireRecord): Vehicle {
+  return {
+    id: record.vehicleId,
+    customerId: record.customerId,
+    plate: record.snapshot?.plate || "-",
+    createdAt: record.createdAt
+  };
+}
+
 export default function App() {
-  // Navigation & Workspace
-  const [currentView, setCurrentView] = useState<"landing" | "login" | "register" | "app">("landing");
+  const [currentView, setCurrentView] = useState<
+    "landing" | "login" | "register" | "app"
+  >("landing");
+
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [searchRedirectQuery, setSearchRedirectQuery] = useState("");
 
-  // Store Entities List
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [tireRecords, setTireRecords] = useState<TireRecord[]>([]);
+
   const [settings, setSettings] = useState<AppSettings>({
     businessName: "Emin Oto Lastik",
     businessType: "Oto Lastik & Rot Balans",
     phone: "",
     address: ""
   });
+
   const [subscription, setSubscription] = useState<UserSubscription>(
     StorageService.getSubscription()
   );
 
-  // Popup Modals triggers
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [selectedDetailRecord, setSelectedDetailRecord] = useState<TireRecord | null>(null);
-  const [selectedPrintRecord, setSelectedPrintRecord] = useState<TireRecord | null>(null);
+  const [selectedDetailRecord, setSelectedDetailRecord] =
+    useState<TireRecord | null>(null);
+  const [selectedPrintRecord, setSelectedPrintRecord] =
+    useState<TireRecord | null>(null);
 
-  // Toast array
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const showToast = (
@@ -107,8 +207,7 @@ export default function App() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  // Fresh synchronizer function across localStorage pools
-  const syncPoolData = () => {
+  const syncLocalPoolData = () => {
     setCustomers(StorageService.getCustomers());
     setVehicles(StorageService.getVehicles());
     setTireRecords(StorageService.getTireRecords());
@@ -116,93 +215,103 @@ export default function App() {
     setSubscription(StorageService.getSubscription());
   };
 
-  // Mount Init sequence
-useEffect(() => {
-  let isMounted = true;
-
-  const initializeApp = async () => {
-    StorageService.initDatabase();
-    syncPoolData();
-
+  const syncPoolData = async () => {
     try {
-      const storedUser = getStoredAuthUser();
+      const [clientResponse, vehicleResponse, tireResponse] =
+        await Promise.all([
+          clientApi.getClients({ page: 0, pageSize: 1000 }),
+          vehicleApi.getVehicles({ page: 0, pageSize: 1000 }),
+          tireApi.getTires({ page: 0, pageSize: 1000 })
+        ]);
 
-      if (storedUser) {
-        setAuthUser(mapApiUserToAuthUser(storedUser));
-        setCurrentView("app");
-      }
+      const apiClients = clientResponse.items || [];
+      const apiVehicles = vehicleResponse.items || [];
+      const apiTires = tireResponse.items || [];
 
-      const verifiedUser = await getAuthDetail();
+      const mappedCustomers = apiClients.map(mapApiClientToCustomer);
+      const mappedVehicles = apiVehicles.map(mapApiVehicleToVehicle);
 
-      if (!isMounted) return;
+      const mappedRecords = apiTires.map((item) =>
+        mapApiTireToRecord(
+          item,
+          mappedCustomers,
+          mappedVehicles,
+          apiVehicles
+        )
+      );
 
-      setAuthUser(mapApiUserToAuthUser(verifiedUser));
-      setCurrentView("app");
-    } catch {
-      clearAuthSession();
+      setCustomers(mappedCustomers);
+      setVehicles(mappedVehicles);
+      setTireRecords(mappedRecords);
 
-      if (!isMounted) return;
-
-      setAuthUser(null);
-      setCurrentView("landing");
-    } finally {
-      if (isMounted) {
-        setIsAuthChecking(false);
-      }
+      setSettings(StorageService.getSettings());
+      setSubscription(StorageService.getSubscription());
+    } catch (error) {
+      console.warn("API verileri alınamadı, local fallback kullanılıyor:", error);
+      syncLocalPoolData();
     }
   };
 
-  initializeApp();
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      setIsAddModalOpen(false);
-      setSelectedDetailRecord(null);
-      setSelectedPrintRecord(null);
-    }
-  };
-
-  window.addEventListener("keydown", handleKeyDown);
-
-  return () => {
-    isMounted = false;
-    window.removeEventListener("keydown", handleKeyDown);
-  };
-}, []);
-
-  const handleLoginOrRegisterSuccess = () => {
-  syncPoolData();
-
-  const apiUser = getStoredAuthUser();
-
-  if (apiUser) {
-    setAuthUser(mapApiUserToAuthUser(apiUser));
-    setSettings(StorageService.getSettings());
-    setSubscription(StorageService.getSubscription());
-  }
-
-  setCurrentView("app");
-};
-
-const handleLogout = async () => {
-  try {
-    await revokeToken();
-  } catch (error) {
-    console.warn("RevokeToken isteği tamamlanamadı:", error);
-  } finally {
-    clearAuthSession();
-    StorageService.logout();
-
-    setAuthUser(null);
-    setCurrentView("landing");
-
-    showToast("Güvenli çıkış yapıldı.", "info");
-  }
-};
-
-  // Prevent background body scroll when any popup modal is open
   useEffect(() => {
-    const isAnyModalOpen = isAddModalOpen || !!selectedDetailRecord || !!selectedPrintRecord;
+    let isMounted = true;
+
+    const initializeApp = async () => {
+      StorageService.initDatabase();
+      syncLocalPoolData();
+
+      try {
+        const storedUser = getStoredAuthUser();
+
+        if (storedUser && isMounted) {
+          setAuthUser(mapApiUserToAuthUser(storedUser));
+          setCurrentView("app");
+        }
+
+        const verifiedUser = await getAuthDetail();
+
+        if (!isMounted) return;
+
+        setAuthUser(mapApiUserToAuthUser(verifiedUser));
+        await syncPoolData();
+
+        if (!isMounted) return;
+
+        setCurrentView("app");
+      } catch {
+        clearAuthSession();
+
+        if (!isMounted) return;
+
+        setAuthUser(null);
+        setCurrentView("landing");
+      } finally {
+        if (isMounted) {
+          setIsAuthChecking(false);
+        }
+      }
+    };
+
+    initializeApp();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsAddModalOpen(false);
+        setSelectedDetailRecord(null);
+        setSelectedPrintRecord(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    const isAnyModalOpen =
+      isAddModalOpen || !!selectedDetailRecord || !!selectedPrintRecord;
 
     if (isAnyModalOpen) {
       document.body.classList.add("overflow-hidden");
@@ -215,25 +324,61 @@ const handleLogout = async () => {
     };
   }, [isAddModalOpen, selectedDetailRecord, selectedPrintRecord]);
 
-  // Compute System statistics live for dashboard UI
-  const calculateStats = (): SystemStats => {
-    const totalRecords = tireRecords.filter((record) => record.status !== "delivered").length;
+  const handleLoginOrRegisterSuccess = async () => {
+    const apiUser = getStoredAuthUser();
 
-    const inStorage = tireRecords.filter(
+    if (apiUser) {
+      setAuthUser(mapApiUserToAuthUser(apiUser));
+      setSettings(StorageService.getSettings());
+      setSubscription(StorageService.getSubscription());
+    }
+
+    await syncPoolData();
+    setCurrentView("app");
+  };
+
+  const handleLogout = async () => {
+    try {
+      await revokeToken();
+    } catch (error) {
+      console.warn("RevokeToken isteği tamamlanamadı:", error);
+    } finally {
+      clearAuthSession();
+      StorageService.logout();
+
+      setAuthUser(null);
+      setCustomers([]);
+      setVehicles([]);
+      setTireRecords([]);
+      setSelectedDetailRecord(null);
+      setSelectedPrintRecord(null);
+      setIsAddModalOpen(false);
+      setCurrentView("landing");
+
+      showToast("Güvenli çıkış yapıldı.", "info");
+    }
+  };
+
+  const calculateStats = (): SystemStats => {
+    const activeRecords = tireRecords.filter(
+      (record) => record.status !== "delivered"
+    );
+
+    const totalRecords = activeRecords.length;
+
+    const inStorage = activeRecords.filter(
       (record) =>
-        record.status !== "delivered" &&
-        record.storageLocation &&
-        record.storageLocation.trim().length > 0
+        record.storageLocation && record.storageLocation.trim().length > 0
     ).length;
 
-    const totalCustomers = customers.filter((customer) => customer.isActive !== false).length;
+    const totalCustomers = customers.filter(
+      (customer) => customer.isActive !== false
+    ).length;
 
     const currentISOMonth = new Date().toISOString().substring(0, 7);
 
-    const addedThisMonth = tireRecords.filter(
-      (record) =>
-        record.status !== "delivered" &&
-        record.createdAt.substring(0, 7) === currentISOMonth
+    const addedThisMonth = activeRecords.filter(
+      (record) => record.createdAt.substring(0, 7) === currentISOMonth
     ).length;
 
     const printedLabelsCount = StorageService.getPrintCounter();
@@ -256,8 +401,13 @@ const handleLogout = async () => {
       )
       .slice(0, 5)
       .map((record) => {
-        const customer = customers.find((item) => item.id === record.customerId);
-        const vehicle = vehicles.find((item) => item.id === record.vehicleId);
+        const customer =
+          customers.find((item) => item.id === record.customerId) ||
+          getFallbackCustomer(record);
+
+        const vehicle =
+          vehicles.find((item) => item.id === record.vehicleId) ||
+          getFallbackVehicle(record);
 
         return {
           record,
@@ -275,19 +425,25 @@ const handleLogout = async () => {
     setActiveTab(targetTab);
   };
 
-  const handleAddNewRecord = (newRecord: TireRecord, autoPrint: boolean) => {
-    syncPoolData();
+  const handleAddNewRecord = async (newRecord: TireRecord, autoPrint: boolean) => {
+    await syncPoolData();
     setIsAddModalOpen(false);
 
     if (autoPrint) {
+      const refreshedRecord =
+        tireRecords.find((record) => record.id === newRecord.id) || newRecord;
+
       setTimeout(() => {
-        setSelectedPrintRecord(newRecord);
+        setSelectedPrintRecord(refreshedRecord);
       }, 100);
     }
   };
 
-  const handleUpdateRecord = (updatedRecord: TireRecord, autoPrint: boolean) => {
-    syncPoolData();
+  const handleUpdateRecord = async (
+    updatedRecord: TireRecord,
+    autoPrint: boolean
+  ) => {
+    await syncPoolData();
     setSelectedDetailRecord(updatedRecord);
 
     if (autoPrint) {
@@ -299,12 +455,15 @@ const handleLogout = async () => {
 
   const handleIncrementPrint = () => {
     StorageService.incrementPrintCounter();
-    syncPoolData();
+    setSubscription(StorageService.getSubscription());
   };
 
-  const handleResetDatabase = () => {
+  const handleResetDatabase = async () => {
     StorageService.resetDatabase();
-    syncPoolData();
+    syncLocalPoolData();
+
+    await syncPoolData();
+
     setActiveTab("dashboard");
   };
 
@@ -312,30 +471,33 @@ const handleLogout = async () => {
   const recentRecords = getRecentDeposits();
 
   const printCustomer = selectedPrintRecord
-    ? customers.find((customer) => customer.id === selectedPrintRecord.customerId)
+    ? customers.find(
+        (customer) => customer.id === selectedPrintRecord.customerId
+      ) || getFallbackCustomer(selectedPrintRecord)
     : undefined;
 
   const printVehicle = selectedPrintRecord
-    ? vehicles.find((vehicle) => vehicle.id === selectedPrintRecord.vehicleId)
+    ? vehicles.find((vehicle) => vehicle.id === selectedPrintRecord.vehicleId) ||
+      getFallbackVehicle(selectedPrintRecord)
     : undefined;
 
   if (isAuthChecking) {
-  return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-xl px-6 py-5 text-center">
-        <p className="text-sm font-bold text-slate-900">Oturum kontrol ediliyor...</p>
-        <p className="text-xs text-slate-400 mt-1">Lütfen bekleyin.</p>
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-xl px-6 py-5 text-center">
+          <p className="text-sm font-bold text-slate-900">
+            Oturum kontrol ediliyor...
+          </p>
+          <p className="text-xs text-slate-400 mt-1">Lütfen bekleyin.</p>
+        </div>
       </div>
-    </div>
-  );
-}  
+    );
+  }
 
   if (currentView === "landing") {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
-        <LandingPage
-          onNavigate={(view) => setCurrentView(view)}
-        />
+        <LandingPage onNavigate={(view) => setCurrentView(view)} />
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </div>
     );

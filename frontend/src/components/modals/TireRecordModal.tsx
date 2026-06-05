@@ -1,7 +1,17 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Upload, Plus, Trash2, Search, Tag, User, Phone, CheckCircle, AlertCircle } from "lucide-react";
+import { X, Upload, Plus, Trash2, Search, Tag, User, Phone } from "lucide-react";
 import { Customer, Vehicle, TireRecord, TirePhoto, TireType } from "../../types";
 import { StorageService } from "../../services/storageService";
+import {
+  clientApi,
+  vehicleApi,
+  constantApi,
+  tireApi,
+  ClientListItemDto,
+  VehicleListItemDto,
+  ConstantListItemDto,
+  CreateTirePayload
+} from "../../services/tireApi";
 import { generateId, generateTireCode, normalizeTurkish, formatPlate, compressImage } from "../../utils/helpers";
 
 interface TireRecordModalProps {
@@ -10,12 +20,50 @@ interface TireRecordModalProps {
   showToast: (msg: string, type: "success" | "error" | "info" | "warning") => void;
 }
 
+function mapApiClientToCustomer(item: ClientListItemDto): Customer {
+  return {
+    id: String(item.id),
+    fullName: item.name,
+    phone: item.phone,
+    createdAt: item.createdDate
+  };
+}
+
+function mapApiVehicleToVehicle(item: VehicleListItemDto): Vehicle {
+  return {
+    id: String(item.id),
+    customerId: String(item.clientId),
+    plate: item.licensePlate,
+    createdAt: item.createdDate
+  };
+}
+
+function getConstantIdByName(
+  constants: ConstantListItemDto[],
+  type: string,
+  name: string
+) {
+  const normalizedName = name.trim().toLowerCase();
+
+  return constants.find(
+    (item) =>
+      item.type === type &&
+      item.name.trim().toLowerCase() === normalizedName
+  )?.id;
+}
+
+function isNumericId(value: string | null | undefined) {
+  return !!value && /^\d+$/.test(value);
+}
+
 export default function TireRecordModal({ onClose, onSave, showToast }: TireRecordModalProps) {
   // Database lookup pools
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [existingRecords, setExistingRecords] = useState<TireRecord[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
+  const [constants, setConstants] = useState<ConstantListItemDto[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Customer search & selection
   const [customerSearch, setCustomerSearch] = useState("");
@@ -42,13 +90,52 @@ export default function TireRecordModal({ onClose, onSave, showToast }: TireReco
   const brandRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Load fresh data
-    setCustomers(StorageService.getCustomers());
-    setVehicles(StorageService.getVehicles());
-    setExistingRecords(StorageService.getTireRecords());
-    setBrands(StorageService.getBrands());
+    let isMounted = true;
 
-    // Click outside lists listener
+    async function loadModalData() {
+      try {
+        const [clientResponse, vehicleResponse, constantResponse] =
+          await Promise.all([
+            clientApi.getClients({ page: 0, pageSize: 1000 }),
+            vehicleApi.getVehicles({ page: 0, pageSize: 1000 }),
+            constantApi.getConstants({ page: 0, pageSize: 1000 })
+          ]);
+
+        if (!isMounted) return;
+
+        const mappedCustomers = (clientResponse.items || []).map(mapApiClientToCustomer);
+        const mappedVehicles = (vehicleResponse.items || []).map(mapApiVehicleToVehicle);
+        const apiConstants = constantResponse.items || [];
+
+        setCustomers(mappedCustomers);
+        setVehicles(mappedVehicles);
+        setConstants(apiConstants);
+
+        const apiBrandNames = apiConstants
+          .filter((item) => item.type === "TIRE_TYPE")
+          .map((item) => item.name);
+
+        setBrands(apiBrandNames);
+        setExistingRecords(StorageService.getTireRecords());
+      } catch (error) {
+        console.error(error);
+
+        if (!isMounted) return;
+
+        setCustomers(StorageService.getCustomers());
+        setVehicles(StorageService.getVehicles());
+        setExistingRecords(StorageService.getTireRecords());
+        setBrands(StorageService.getBrands());
+
+        showToast(
+          "API müşteri/araç/marka bilgileri yüklenemedi. Yerel veriler gösteriliyor.",
+          "warning"
+        );
+      }
+    }
+
+    loadModalData();
+
     const handleClickOutside = (e: MouseEvent) => {
       if (customerRef.current && !customerRef.current.contains(e.target as Node)) {
         setShowCustomerDropdown(false);
@@ -59,7 +146,11 @@ export default function TireRecordModal({ onClose, onSave, showToast }: TireReco
     };
 
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+
+    return () => {
+      isMounted = false;
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, []);
 
   // Customer Selection & Autocomplete
@@ -165,105 +256,152 @@ export default function TireRecordModal({ onClose, onSave, showToast }: TireReco
   };
 
   // Submit Handler
-  const handleSubmit = (autoPrint: boolean) => {
-    // Validations
-    if (!customerSearch.trim()) {
-      showToast("Lütfen müşteri adı soyadı girin.", "warning");
-      return;
-    }
-    if (!phone.trim()) {
-      showToast("Lütfen müşteri telefonu girin.", "warning");
-      return;
-    }
-    if (!plate.trim()) {
-      showToast("Araç plaka bilgisi zorunludur.", "warning");
-      return;
-    }
-    if (!brandSearch.trim()) {
-      showToast("Lütfen lastik markasını seçin veya girin.", "warning");
-      return;
-    }
-    if (!size.trim()) {
-      showToast("Ebat / Boyut girilmesi zorunludur (örn. 205/55/R16).", "warning");
-      return;
-    }
-    if (quantity < 1) {
-      showToast("Lastik adeti en az 1 olmalıdır.", "warning");
-      return;
-    }
+const handleSubmit = async (autoPrint: boolean) => {
+  if (!customerSearch.trim()) {
+    showToast("Lütfen müşteri adı soyadı girin.", "warning");
+    return;
+  }
 
-    try {
-      // 1. Establish Customer Link
-      let finalCustomerId = selectedCustomerId;
-      let finalCustomerName = customerSearch.trim();
+  if (!phone.trim() && (!selectedCustomerId || selectedCustomerId === "NEW_CUSTOMER")) {
+    showToast("Yeni müşteri için telefon numarası zorunludur.", "warning");
+    return;
+  }
 
-      if (!finalCustomerId || finalCustomerId === "NEW_CUSTOMER") {
-        // Create brand new customer
-        const newCustId = "cust-" + generateId();
-        const newCustObj: Customer = {
-          id: newCustId,
-          fullName: finalCustomerName,
-          phone: phone.trim(),
-          createdAt: new Date().toISOString()
-        };
-        StorageService.addCustomer(newCustObj);
-        finalCustomerId = newCustId;
+  if (!plate.trim()) {
+    showToast("Araç plaka bilgisi zorunludur.", "warning");
+    return;
+  }
+
+  if (!brandSearch.trim()) {
+    showToast("Lütfen lastik markasını seçin veya girin.", "warning");
+    return;
+  }
+
+  if (!size.trim()) {
+    showToast("Ebat / Boyut girilmesi zorunludur. Örn: 205/55 R16", "warning");
+    return;
+  }
+
+  if (quantity < 1) {
+    showToast("Lastik adeti en az 1 olmalıdır.", "warning");
+    return;
+  }
+
+  const modelConstantId = getConstantIdByName(constants, "TIRE_TYPE", brandSearch);
+  const brandConstantId = getConstantIdByName(constants, "TIRE_BRAND", tireType);
+
+  if (modelConstantId === undefined) {
+    showToast(
+      `"${brandSearch}" markası backend sabitlerinde bulunamadı. Lütfen Swagger Constant listesindeki bir markayı seçin.`,
+      "warning"
+    );
+    return;
+  }
+
+  if (brandConstantId === undefined) {
+    showToast(
+      `"${tireType}" mevsim türü backend sabitlerinde bulunamadı.`,
+      "warning"
+    );
+    return;
+  }
+
+  try {
+    setIsSaving(true);
+
+    const formattedPlate = formatPlate(plate);
+
+    const existingVehicle = vehicles.find(
+      (vehicle) =>
+        formatPlate(vehicle.plate).toUpperCase() === formattedPlate.toUpperCase() &&
+        (!selectedCustomerId || vehicle.customerId === selectedCustomerId)
+    );
+
+    const hasSelectedApiCustomer =
+      selectedCustomerId &&
+      selectedCustomerId !== "NEW_CUSTOMER" &&
+      isNumericId(selectedCustomerId);
+
+    const hasSelectedApiVehicle =
+      existingVehicle && isNumericId(existingVehicle.id);
+
+    const payload: CreateTirePayload = {
+      client: hasSelectedApiCustomer
+        ? {
+            id: Number(selectedCustomerId),
+            name: null,
+            phone: null
+          }
+        : {
+            id: null,
+            name: customerSearch.trim(),
+            phone: phone.trim()
+          },
+
+      vehicle: hasSelectedApiVehicle
+        ? {
+            id: Number(existingVehicle.id),
+            licensePlate: null,
+            note: null,
+            imageIds: []
+          }
+        : {
+            id: null,
+            licensePlate: formattedPlate,
+            note: storageLocation.trim() || null,
+            imageIds: []
+          },
+
+      modelConstantId,
+      brandConstantId,
+      sizes: size.trim(),
+      count: Number(quantity)
+    };
+
+    const savedTire = await tireApi.addTire(payload);
+
+    const finalCustomerId = hasSelectedApiCustomer
+      ? String(selectedCustomerId)
+      : String(savedTire.id);
+
+    const finalVehicleId = savedTire.vehicleId
+      ? String(savedTire.vehicleId)
+      : existingVehicle?.id || "";
+
+    const newRecord: TireRecord = {
+      id: String(savedTire.id),
+      customerId: finalCustomerId,
+      vehicleId: finalVehicleId,
+      tireCode: savedTire.code || generateTireCode(existingRecords.map((r) => r.tireCode)),
+      tireType: savedTire.brandConstantName || tireType,
+      brand: savedTire.modelConstantName || brandSearch.trim(),
+      size: savedTire.sizes || size.trim(),
+      quantity: savedTire.count || Number(quantity),
+      storageLocation: storageLocation.trim() || undefined,
+      photos,
+      createdAt: savedTire.createdDate || new Date().toISOString(),
+      snapshot: {
+        customerName: savedTire.clientName || customerSearch.trim(),
+        phone: hasSelectedApiCustomer ? "" : phone.trim(),
+        plate: savedTire.vehicleLicensePlate || formattedPlate
       }
+    } as TireRecord;
 
-      // 2. Establish Vehicle Link
-      let finalPlate = formatPlate(plate);
-      // Try to find if vehicle exists
-      let existingVeh = vehicles.find(v => v.plate.toUpperCase() === finalPlate);
-      let finalVehicleId = "";
+    onSave(newRecord, autoPrint);
+    showToast("Emanet lastik kaydı backend'e başarıyla kaydedildi.", "success");
+  } catch (error) {
+    console.error(error);
 
-      if (!existingVeh) {
-        // Register brand new vehicle and link to customer
-        const newVehicleId = "veh-" + generateId();
-        const newVehObj: Vehicle = {
-          id: newVehicleId,
-          customerId: finalCustomerId,
-          plate: finalPlate,
-          createdAt: new Date().toISOString()
-        };
-        StorageService.addVehicle(newVehObj);
-        finalVehicleId = newVehicleId;
-      } else {
-        finalVehicleId = existingVeh.id;
-        // If vehicle belonged to someone else, link it if relevant, or keep existing
-      }
-
-      // Add brand to local list if novel
-      const matchedBrand = brands.find(b => b.toLowerCase() === brandSearch.trim().toLowerCase());
-      if (!matchedBrand) {
-        StorageService.addBrand(brandSearch.trim());
-      }
-
-      // 3. Assemble Tire Record
-      const nextTireCode = generateTireCode(existingRecords.map(r => r.tireCode));
-      const newRecord: TireRecord = {
-        id: "rec-" + generateId(),
-        customerId: finalCustomerId,
-        vehicleId: finalVehicleId,
-        tireCode: nextTireCode,
-        tireType: tireType,
-        brand: brandSearch.trim(),
-        size: size.trim(),
-        quantity: Number(quantity),
-        storageLocation: storageLocation.trim() || undefined,
-        photos: photos,
-        createdAt: new Date().toISOString()
-      };
-
-      StorageService.addTireRecord(newRecord);
-
-      // Trigger standard save
-      onSave(newRecord, autoPrint);
-      showToast("Emanet lastik kaydı başarıyla oluşturuldu.", "success");
-    } catch (err) {
-      console.error(err);
-      showToast("Kayıt oluşturulurken beklenmedik hata oluştu.", "error");
-    }
-  };
+    showToast(
+      error instanceof Error
+        ? error.message
+        : "Kayıt oluşturulurken beklenmedik hata oluştu.",
+      "error"
+    );
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
@@ -371,6 +509,7 @@ export default function TireRecordModal({ onClose, onSave, showToast }: TireReco
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
+                    disabled={!!selectedCustomerId && selectedCustomerId !== "NEW_CUSTOMER"}
                     placeholder="Örn: 0555 123 4567"
                     className="w-full px-3.5 py-2.5 pl-9.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all"
                   />
@@ -497,7 +636,7 @@ export default function TireRecordModal({ onClose, onSave, showToast }: TireReco
                   type="text"
                   value={size}
                   onChange={(e) => setSize(e.target.value)}
-                  placeholder="Örn: 205/55/R16 veya 225/45/R17"
+                  placeholder="Örn: 225/45/17"
                   className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 font-mono tracking-wide focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all"
                 />
               </div>
@@ -622,15 +761,15 @@ export default function TireRecordModal({ onClose, onSave, showToast }: TireReco
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 onClick={() => handleSubmit(false)}
-                disabled={isUploading}
+                disabled={isUploading || isSaving}
                 className="inline-flex h-11 min-w-[150px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 px-5 text-sm font-extrabold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-200 hover:text-slate-950 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Yalnızca Kaydet
+                {isSaving ? "Kaydediliyor..." : "Yalnızca Kaydet"}
               </button>
 
               <button
                 onClick={() => handleSubmit(true)}
-                disabled={isUploading}
+                disabled={isUploading || isSaving}
                 className="inline-flex h-11 min-w-[180px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 text-sm font-black text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span>Kaydet ve Etiketle</span>

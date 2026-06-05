@@ -1,26 +1,39 @@
 import { AppSettings } from "../types";
 import { getValidAccessToken } from "./authApi";
 
+const RAW_API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "https://gateway.teggsoft.com"
+).replace(/\/$/, "");
+
+const API_BASE_URL = RAW_API_BASE_URL.endsWith("/tire")
+  ? RAW_API_BASE_URL.slice(0, -5)
+  : RAW_API_BASE_URL;
+
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+
 export interface BusinessApiResponse {
   id: number;
   name: string;
   address: string | null;
   phone: string | null;
   slug: string;
-  uploadFileId: number | null;
   status: boolean;
   createdDate: string;
   imageFile: unknown | null;
+
+  /**
+   * Swagger response içinde her zaman görünmüyor.
+   * Update request body içinde uploadFileId var.
+   */
+  uploadFileId?: number | null;
 }
 
 export interface UpdateBusinessPayload {
   name: string;
   address: string;
   phone: string;
-  uploadFileId: number | null;
+  uploadFileId?: number | null;
 }
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 function getApiErrorMessage(data: unknown): string {
   if (!data || typeof data !== "object") {
@@ -33,6 +46,9 @@ function getApiErrorMessage(data: unknown): string {
     error?: string;
     Error?: string;
     title?: string;
+    Title?: string;
+    detail?: string;
+    Detail?: string;
     errors?: Record<string, string[]>;
   };
 
@@ -41,6 +57,9 @@ function getApiErrorMessage(data: unknown): string {
   if (errorData.error) return errorData.error;
   if (errorData.Error) return errorData.Error;
   if (errorData.title) return errorData.title;
+  if (errorData.Title) return errorData.Title;
+  if (errorData.detail) return errorData.detail;
+  if (errorData.Detail) return errorData.Detail;
 
   if (errorData.errors) {
     const firstError = Object.values(errorData.errors).flat()[0];
@@ -52,21 +71,19 @@ function getApiErrorMessage(data: unknown): string {
 
 async function businessRequest<T>(
   endpoint: string,
-  options: RequestInit = {}
+  method: HttpMethod = "GET",
+  body?: unknown
 ): Promise<T> {
-  if (!API_BASE_URL) {
-    throw new Error("API adresi bulunamadı. frontend/.env içine VITE_API_BASE_URL ekleyin.");
-  }
-
   const token = await getValidAccessToken();
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
+    method,
     headers: {
       accept: "*/*",
-      Authorization: `Bearer ${token}`,
-      ...(options.headers || {})
-    }
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      Authorization: `Bearer ${token}`
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined
   });
 
   const data = await response.json().catch(() => null);
@@ -79,26 +96,28 @@ async function businessRequest<T>(
 }
 
 export async function getBusinessById(): Promise<BusinessApiResponse> {
-  return businessRequest<BusinessApiResponse>("/Business/Get", {
-    method: "GET"
-  });
+  return businessRequest<BusinessApiResponse>("/tire/Business/Get", "GET");
 }
 
 export async function updateBusiness(
   payload: UpdateBusinessPayload
 ): Promise<BusinessApiResponse> {
-  return businessRequest<BusinessApiResponse>("/Business/Update", {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      name: payload.name,
-      address: payload.address,
-      phone: payload.phone,
-      uploadFileId: payload.uploadFileId
-    })
-  });
+  const body: {
+    name: string;
+    address: string;
+    phone: string;
+    uploadFileId?: number;
+  } = {
+    name: payload.name,
+    address: payload.address,
+    phone: payload.phone
+  };
+
+  if (typeof payload.uploadFileId === "number") {
+    body.uploadFileId = payload.uploadFileId;
+  }
+
+  return businessRequest<BusinessApiResponse>("/tire/Business/Update", "PUT", body);
 }
 
 export function mapBusinessToSettings(

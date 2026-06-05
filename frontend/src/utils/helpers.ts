@@ -61,11 +61,32 @@ export function normalizeTurkish(text: string): string {
 /**
  * Formats date into Turkish locale representation
  */
+/**
+ * Backend tarihlerini Türkiye formatında gösterir.
+ * Backend genelde "+03:00" offsetli tarih gönderdiği için
+ * JS Date timezone dönüşümü yaptırmadan string üzerinden formatlarız.
+ */
 export function formatDate(dateString: string): string {
+  if (!dateString) return "-";
+
   try {
+    const match = dateString.match(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/
+    );
+
+    if (match) {
+      const [, year, month, day, hour, minute] = match;
+      return `${day}.${month}.${year} ${hour}:${minute}`;
+    }
+
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return dateString;
+
+    if (Number.isNaN(date.getTime())) {
+      return dateString;
+    }
+
     return date.toLocaleString("tr-TR", {
+      timeZone: "Europe/Istanbul",
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
