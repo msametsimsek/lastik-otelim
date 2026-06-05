@@ -34,6 +34,7 @@ function mapApiVehicleToVehicle(item: VehicleListItemDto): Vehicle {
     id: String(item.id),
     customerId: String(item.clientId),
     plate: item.licensePlate,
+    note: item.note || "",
     createdAt: item.createdDate
   };
 }
@@ -56,9 +57,11 @@ export default function CustomersPage({
   const [newFullName, setNewFullName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newPlate, setNewPlate] = useState("");
+  const [newInitialPlateNote, setNewInitialPlateNote] = useState("");
 
   const [showAddPlateForm, setShowAddPlateForm] = useState(false);
   const [newPlateValue, setNewPlateValue] = useState("");
+  const [newPlateNote, setNewPlateNote] = useState("");
 
   const [apiCustomers, setApiCustomers] = useState<Customer[]>([]);
   const [apiVehicles, setApiVehicles] = useState<Vehicle[]>([]);
@@ -154,7 +157,11 @@ export default function CustomersPage({
       vehicle.plate.toLowerCase().includes(query)
     );
 
-    return nameMatch || phoneMatch || plateMatch;
+    const noteMatch = customerPlates.some((vehicle) =>
+      (vehicle.note || "").toLowerCase().includes(query)
+    );
+
+    return nameMatch || phoneMatch || plateMatch || noteMatch;
   });
 
   const handleCreateCustomer = async (e: FormEvent) => {
@@ -183,7 +190,7 @@ export default function CustomersPage({
         await vehicleApi.addVehicle({
           clientId: createdCustomer.id,
           licensePlate: formatPlate(newPlate),
-          note: "",
+          note: newInitialPlateNote.trim(),
           imageIds: []
         });
       }
@@ -193,6 +200,7 @@ export default function CustomersPage({
       setNewFullName("");
       setNewPhone("");
       setNewPlate("");
+      setNewInitialPlateNote("");
       setShowAddModal(false);
 
       await reloadCustomerAndVehicleData(String(createdCustomer.id));
@@ -239,13 +247,14 @@ export default function CustomersPage({
       await vehicleApi.addVehicle({
         clientId: numericCustomerId,
         licensePlate: plateNormalized,
-        note: "",
+        note: newPlateNote.trim(),
         imageIds: []
       });
 
       showToast(`${plateNormalized} plakalı araç müşteriye tanımlandı.`, "success");
 
       setNewPlateValue("");
+      setNewPlateNote("");
       setShowAddPlateForm(false);
 
       await reloadCustomerAndVehicleData(selectedCustomerId);
@@ -410,12 +419,20 @@ export default function CustomersPage({
                 ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     {activeCustomerVehicles.map((vehicle) => (
-                      <span
+                      <div
                         key={vehicle.id}
-                        className="font-mono font-bold text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1.5 text-xs rounded-xl tracking-wider shadow-3xs uppercase"
+                        className="rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 shadow-3xs"
                       >
-                        {vehicle.plate}
-                      </span>
+                        <div className="font-mono font-bold text-blue-700 text-xs tracking-wider uppercase">
+                          {vehicle.plate}
+                        </div>
+
+                        {vehicle.note && (
+                          <div className="mt-1 max-w-[220px] text-[10px] text-slate-500 font-semibold line-clamp-2 normal-case">
+                            {vehicle.note}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -423,7 +440,7 @@ export default function CustomersPage({
                 {showAddPlateForm && (
                   <form
                     onSubmit={handleAddPlate}
-                    className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex gap-2 max-w-sm animate-slide-in"
+                    className="bg-slate-50 border border-slate-200 p-4 rounded-2xl grid grid-cols-1 gap-2 max-w-sm animate-slide-in"
                   >
                     <input
                       type="text"
@@ -432,6 +449,14 @@ export default function CustomersPage({
                       onChange={(e) => setNewPlateValue(e.target.value)}
                       placeholder="Plaka Giriniz (örn: 34XYZ789)"
                       className="flex-1 bg-white px-4 py-2 text-xs rounded-xl border border-slate-200 uppercase font-mono tracking-wider font-extrabold focus:outline-none focus:border-blue-500"
+                    />
+
+                    <textarea
+                      value={newPlateNote}
+                      onChange={(e) => setNewPlateNote(e.target.value)}
+                      placeholder="Araç / plaka notu..."
+                      rows={2}
+                      className="flex-1 bg-white px-4 py-2 text-xs rounded-xl border border-slate-200 font-semibold focus:outline-none focus:border-blue-500 resize-none"
                     />
 
                     <button
@@ -543,6 +568,15 @@ export default function CustomersPage({
                                 {record.storageLocation || "Girilmemiş"}
                               </span>
                             </div>
+
+                            {(record.vehicleNote || vehicleObj?.note) && (
+                              <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] text-slate-600 line-clamp-2">
+                                Not:{" "}
+                                <span className="font-semibold text-slate-800">
+                                  {record.vehicleNote || vehicleObj?.note}
+                                </span>
+                              </div>
+                            )}
                           </div>
 
                           <div className="grid grid-cols-5 gap-2 pt-2 border-t border-slate-100">
@@ -662,6 +696,14 @@ export default function CustomersPage({
                     placeholder="örn: 34XYZ567"
                     className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 font-mono text-sm font-black uppercase tracking-wider text-slate-800 outline-none transition-all placeholder:font-sans placeholder:tracking-normal placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
                   />
+
+                    <textarea
+                      value={newInitialPlateNote}
+                      onChange={(e) => setNewInitialPlateNote(e.target.value)}
+                      placeholder="İlk araç için not..."
+                      rows={2}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 resize-none"
+                    />
                 </div>
               </div>
 

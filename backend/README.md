@@ -1,6 +1,6 @@
-# LastikTakip Backend
+# LastikOtelim Backend
 
-Bu klasör LastikTakip projesinin backend/API tarafı için ayrılmıştır.
+Bu klasör LastikOtelimprojesinin backend/API tarafı için ayrılmıştır.
 
 Şu an frontend localStorage/mock data ile çalışmaktadır.
 Backend ileride burada geliştirilecektir.
@@ -24,3 +24,4 @@ http://localhost:5000/health
 - LastikCode üretimi
 - Etiket yazdırma verileri
 - Teslim edildi / arşiv kayıtları
+```

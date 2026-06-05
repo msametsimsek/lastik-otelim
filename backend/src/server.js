@@ -10,8 +10,8 @@ const server = http.createServer((req, res) => {
     res.writeHead(200);
     res.end(JSON.stringify({
       success: true,
-      message: "LastikTakip backend çalışıyor.",
-      service: "lastik-takip-backend"
+      message: "LastikOtelimbackend çalışıyor.",
+      service: "lastik-otelim-backend"
     }));
     return;
   }
@@ -19,11 +19,11 @@ const server = http.createServer((req, res) => {
   res.writeHead(200);
   res.end(JSON.stringify({
     success: true,
-    message: "LastikTakip Backend API",
+    message: "LastikOtelim Backend API",
     endpoints: ["/health"]
   }));
 });
 
 server.listen(PORT, () => {
-  console.log(`LastikTakip backend http://localhost:${PORT} adresinde çalışıyor.`);
+  console.log(`LastikOtelim backend http://localhost:${PORT} adresinde çalışıyor.`);
 });

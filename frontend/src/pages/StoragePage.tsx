@@ -56,6 +56,7 @@ export default function StoragePage({
       id: record.vehicleId,
       customerId: record.customerId,
       plate: record.snapshot?.plate || "-",
+      note: record.vehicleNote || record.snapshot?.vehicleNote || "",
       createdAt: record.createdAt
     };
   };
@@ -79,6 +80,9 @@ export default function StoragePage({
     const nameMatch = normalizeTurkish(customer.fullName || "").includes(queryNorm);
     const phoneMatch = normalizeTurkish(customer.phone || "").includes(queryNorm);
     const plateMatch = normalizeTurkish(vehicle.plate || "").includes(queryNorm);
+    const noteMatch = normalizeTurkish(
+      record.vehicleNote || vehicle.note || ""
+    ).includes(queryNorm);
 
     return (
       locationMatch ||
@@ -88,7 +92,8 @@ export default function StoragePage({
       typeMatch ||
       nameMatch ||
       phoneMatch ||
-      plateMatch
+      plateMatch ||
+      noteMatch
     );
   });
 
@@ -216,6 +221,15 @@ export default function StoragePage({
                           <span className="text-xs text-slate-400 font-normal mt-0.5">
                             {record.tireType} Mevsim • {record.quantity} Adet Lastik
                           </span>
+
+                          {(record.vehicleNote || vehicle.note) && (
+                            <span className="mt-1 text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 line-clamp-2">
+                              Not:{" "}
+                              <span className="font-semibold text-slate-700">
+                                {record.vehicleNote || vehicle.note}
+                              </span>
+                            </span>
+                          )}
                         </div>
                       </td>
 

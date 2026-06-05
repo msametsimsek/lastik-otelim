@@ -100,6 +100,7 @@ export interface TireListItemDto {
   count: number;
   code: string;
   clientName: string;
+  storageLocation: string | null;
   createdDate: string;
   createdUsername: string;
 }
@@ -124,6 +125,7 @@ export interface CreateTirePayload {
   brandConstantId: number;
   sizes: string;
   count: number;
+  storageLocation: string;
 }
 
 export interface UpdateTirePayload {
@@ -132,6 +134,7 @@ export interface UpdateTirePayload {
   brandConstantId: number;
   sizes: string;
   count: number;
+  storageLocation?: string;
 }
 
 export const searchPlaceholders = {

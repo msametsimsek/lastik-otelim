@@ -1,4 +1,4 @@
-# LastikOtelim / LastikTakip
+# LastikOtelim
 
 LastikOtelim, lastik işletmeleri için geliştirilen müşteri, araç, lastik emaneti, depo konumu, etiket yazdırma ve işletme yönetimi odaklı modern bir takip sistemidir.
 
@@ -146,4 +146,4 @@ Bu proje TeggSoft ekosistemi içerisinde geliştirilen SaaS tabanlı işletme y�
 ## Geliştirici
 
 **Samet Şimşek**
-TeggSoft Creative Systems
+TeggSoft Creative Agency

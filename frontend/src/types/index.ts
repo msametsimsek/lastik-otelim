@@ -11,6 +11,7 @@ export type Vehicle = {
   id: string;
   customerId: string;
   plate: string;
+  note?: string;
   createdAt: string;
   updatedAt?: string;
 };
@@ -19,7 +20,7 @@ export type TirePhoto = {
   id: string;
   name: string;
   type: string;
-  dataUrl: string; // base64 representation of the image
+  dataUrl: string;
 };
 
 export type TireType = "Yazlık" | "Kışlık" | "4 Mevsim";
@@ -34,28 +35,28 @@ export type TireRecord = {
   size: string;
   quantity: number;
   storageLocation?: string;
+  vehicleNote?: string;
   photos: TirePhoto[];
   createdAt: string;
   updatedAt?: string;
-  
-  // Deliver/archive status fields
+
   status?: "active" | "delivered";
   deliveredAt?: string;
   deletedAt?: string;
   deliveryNote?: string;
   deletedReason?: string;
-  
-  // Archive snapshot info
+
   snapshot?: {
     customerName: string;
     phone: string;
     plate: string;
-    tireCode: string;
-    tireType: string;
-    brand: string;
-    size: string;
-    quantity: number;
+    tireCode?: string;
+    tireType?: string;
+    brand?: string;
+    size?: string;
+    quantity?: number;
     storageLocation?: string;
+    vehicleNote?: string;
   };
 };
 
@@ -94,9 +95,15 @@ export interface UserSubscription {
   cancelledAt?: string;
 }
 
-export type ActiveTab = "dashboard" | "add-tire" | "records" | "customers" | "storage" | "subscription" 
-| "settings" | "reminders"
-;
+export type ActiveTab =
+  | "dashboard"
+  | "add-tire"
+  | "records"
+  | "customers"
+  | "storage"
+  | "subscription"
+  | "settings"
+  | "reminders";
 
 export interface AuthUser {
   id: string;

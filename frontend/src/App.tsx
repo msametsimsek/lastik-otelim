@@ -31,7 +31,8 @@ import {
 } from "./types";
 
 import { StorageService } from "./services/storageService";
-import { generateId } from "./utils/helpers";
+import { getBusinessById, mapBusinessToSettings } from "./services/businessApi";
+import { generateId, normalizeTurkish } from "./utils/helpers";
 
 import {
   AuthApiUser,
@@ -77,6 +78,7 @@ function mapApiVehicleToVehicle(item: VehicleListItemDto): Vehicle {
     id: String(item.id),
     customerId: String(item.clientId),
     plate: item.licensePlate || "-",
+    note: item.note || "",
     createdAt: item.createdDate
   };
 }
@@ -95,23 +97,41 @@ function mapApiTireToRecord(
     (vehicle) => vehicle.id === item.vehicleId
   );
 
-  const matchedCustomer = matchedVehicle
+  const cleanClientName =
+    item.clientName && item.clientName.trim() && item.clientName !== "string"
+      ? item.clientName.trim()
+      : "";
+
+  const matchedCustomerByVehicle = matchedVehicle
     ? mappedCustomers.find(
         (customer) => customer.id === matchedVehicle.customerId
       )
     : undefined;
 
-  const cleanClientName =
-    item.clientName && item.clientName.trim() && item.clientName !== "string"
-      ? item.clientName
-      : "";
+  const matchedCustomerByName = cleanClientName
+    ? mappedCustomers.find(
+        (customer) =>
+          normalizeTurkish(customer.fullName) === normalizeTurkish(cleanClientName)
+      )
+    : undefined;
+
+  const matchedCustomer = matchedCustomerByVehicle || matchedCustomerByName;
 
   const customerName =
     cleanClientName || matchedCustomer?.fullName || "Bilinmeyen Cari";
 
   const customerPhone = matchedCustomer?.phone || "";
-  const vehiclePlate =
-    item.vehicleLicensePlate || matchedVehicle?.plate || "-";
+  const vehiclePlate = item.vehicleLicensePlate || matchedVehicle?.plate || "-";
+
+  const storageLocation =
+    item.storageLocation && item.storageLocation.trim()
+      ? item.storageLocation.trim()
+      : "";
+
+  const vehicleNote =
+    matchedApiVehicle?.note && matchedApiVehicle.note.trim()
+      ? matchedApiVehicle.note.trim()
+      : matchedVehicle?.note || "";
 
   return {
     id: String(item.id),
@@ -122,7 +142,8 @@ function mapApiTireToRecord(
     brand: item.modelConstantName || "Belirtilmedi",
     size: item.sizes || "Belirtilmedi",
     quantity: item.count || 0,
-    storageLocation: matchedApiVehicle?.note || "",
+    storageLocation,
+    vehicleNote,
     photos: [],
     createdAt: item.createdDate,
     updatedAt: item.createdDate,
@@ -130,9 +151,11 @@ function mapApiTireToRecord(
     snapshot: {
       customerName,
       phone: customerPhone,
-      plate: vehiclePlate
+      plate: vehiclePlate,
+      storageLocation,
+      vehicleNote
     }
-  } as TireRecord;
+  };
 }
 
 function getFallbackCustomer(record: TireRecord): Customer {
@@ -149,9 +172,17 @@ function getFallbackVehicle(record: TireRecord): Vehicle {
     id: record.vehicleId,
     customerId: record.customerId,
     plate: record.snapshot?.plate || "-",
+    note: record.vehicleNote || record.snapshot?.vehicleNote || "",
     createdAt: record.createdAt
   };
 }
+
+const defaultSettings: AppSettings = {
+  businessName: "LastikOtelim",
+  businessType: "Oto Lastik & Rot Balans",
+  phone: "",
+  address: ""
+};
 
 export default function App() {
   const [currentView, setCurrentView] = useState<
@@ -166,14 +197,7 @@ export default function App() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [tireRecords, setTireRecords] = useState<TireRecord[]>([]);
-
-  const [settings, setSettings] = useState<AppSettings>({
-    businessName: "Emin Oto Lastik",
-    businessType: "Oto Lastik & Rot Balans",
-    phone: "",
-    address: ""
-  });
-
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [subscription, setSubscription] = useState<UserSubscription>(
     StorageService.getSubscription()
   );
@@ -207,15 +231,42 @@ export default function App() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const syncLocalPoolData = () => {
+  const syncLocalEntityData = () => {
     setCustomers(StorageService.getCustomers());
     setVehicles(StorageService.getVehicles());
     setTireRecords(StorageService.getTireRecords());
-    setSettings(StorageService.getSettings());
     setSubscription(StorageService.getSubscription());
   };
 
+  const syncBusinessSettings = async () => {
+    try {
+      const business = await getBusinessById();
+
+      const nextSettings = mapBusinessToSettings(
+        business,
+        "Oto Lastik & Rot Balans Servisi"
+      );
+
+      setSettings(nextSettings);
+
+      setAuthUser((currentUser) => {
+        if (!currentUser) return currentUser;
+
+        return {
+          ...currentUser,
+          businessName: business.name || currentUser.businessName,
+          phone: business.phone || currentUser.phone,
+          address: business.address || currentUser.address
+        };
+      });
+    } catch (error) {
+      console.warn("İşletme bilgisi API üzerinden alınamadı:", error);
+    }
+  };
+
   const syncPoolData = async () => {
+    await syncBusinessSettings();
+
     try {
       const [clientResponse, vehicleResponse, tireResponse] =
         await Promise.all([
@@ -230,25 +281,17 @@ export default function App() {
 
       const mappedCustomers = apiClients.map(mapApiClientToCustomer);
       const mappedVehicles = apiVehicles.map(mapApiVehicleToVehicle);
-
       const mappedRecords = apiTires.map((item) =>
-        mapApiTireToRecord(
-          item,
-          mappedCustomers,
-          mappedVehicles,
-          apiVehicles
-        )
+        mapApiTireToRecord(item, mappedCustomers, mappedVehicles, apiVehicles)
       );
 
       setCustomers(mappedCustomers);
       setVehicles(mappedVehicles);
       setTireRecords(mappedRecords);
-
-      setSettings(StorageService.getSettings());
       setSubscription(StorageService.getSubscription());
     } catch (error) {
       console.warn("API verileri alınamadı, local fallback kullanılıyor:", error);
-      syncLocalPoolData();
+      syncLocalEntityData();
     }
   };
 
@@ -257,7 +300,7 @@ export default function App() {
 
     const initializeApp = async () => {
       StorageService.initDatabase();
-      syncLocalPoolData();
+      syncLocalEntityData();
 
       try {
         const storedUser = getStoredAuthUser();
@@ -283,6 +326,9 @@ export default function App() {
         if (!isMounted) return;
 
         setAuthUser(null);
+        setCustomers([]);
+        setVehicles([]);
+        setTireRecords([]);
         setCurrentView("landing");
       } finally {
         if (isMounted) {
@@ -329,7 +375,6 @@ export default function App() {
 
     if (apiUser) {
       setAuthUser(mapApiUserToAuthUser(apiUser));
-      setSettings(StorageService.getSettings());
       setSubscription(StorageService.getSubscription());
     }
 
@@ -426,15 +471,24 @@ export default function App() {
   };
 
   const handleAddNewRecord = async (newRecord: TireRecord, autoPrint: boolean) => {
+    setTireRecords((currentRecords) => {
+      const exists = currentRecords.some((record) => record.id === newRecord.id);
+
+      if (exists) {
+        return currentRecords.map((record) =>
+          record.id === newRecord.id ? newRecord : record
+        );
+      }
+
+      return [newRecord, ...currentRecords];
+    });
+
     await syncPoolData();
     setIsAddModalOpen(false);
 
     if (autoPrint) {
-      const refreshedRecord =
-        tireRecords.find((record) => record.id === newRecord.id) || newRecord;
-
       setTimeout(() => {
-        setSelectedPrintRecord(refreshedRecord);
+        setSelectedPrintRecord(newRecord);
       }, 100);
     }
   };
@@ -443,8 +497,14 @@ export default function App() {
     updatedRecord: TireRecord,
     autoPrint: boolean
   ) => {
-    await syncPoolData();
+    setTireRecords((currentRecords) =>
+      currentRecords.map((record) =>
+        record.id === updatedRecord.id ? updatedRecord : record
+      )
+    );
+
     setSelectedDetailRecord(updatedRecord);
+    await syncPoolData();
 
     if (autoPrint) {
       setTimeout(() => {
@@ -460,7 +520,7 @@ export default function App() {
 
   const handleResetDatabase = async () => {
     StorageService.resetDatabase();
-    syncLocalPoolData();
+    syncLocalEntityData();
 
     await syncPoolData();
 
