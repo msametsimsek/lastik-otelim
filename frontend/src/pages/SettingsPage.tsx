@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { HardDrive, Loader2, Mail, Save, Settings } from "lucide-react";
-import type { AppSettings } from "../types";
-import { StorageService } from "../services/storageService";
+
 import {
   getBusinessById,
-  mapBusinessToSettings,
   updateBusiness
 } from "../services/businessApi";
+
 import type { BusinessApiResponse } from "../services/businessApi";
+import { getAuthDetail } from "../services/authApi";
 
 interface SettingsPageProps {
   onResetDatabase: () => void;
@@ -15,28 +15,7 @@ interface SettingsPageProps {
   onSaveSuccess?: () => void;
 }
 
-type StoredUser = {
-  email?: string;
-  Email?: string;
-  mail?: string;
-  Mail?: string;
-};
-
 const DEFAULT_BUSINESS_TYPE = "Oto Lastik & Servis";
-
-function getAccountEmailFromLocalStorage() {
-  try {
-    const rawUser = localStorage.getItem("user");
-
-    if (!rawUser) return "";
-
-    const user = JSON.parse(rawUser) as StoredUser;
-
-    return user.email || user.Email || user.mail || user.Mail || "";
-  } catch {
-    return "";
-  }
-}
 
 export default function SettingsPage({
   showToast,
@@ -47,68 +26,48 @@ export default function SettingsPage({
 
   const [accountEmail, setAccountEmail] = useState("");
   const [businessName, setBusinessName] = useState("");
-  const [businessType, setBusinessType] = useState("");
+  const [businessType] = useState(DEFAULT_BUSINESS_TYPE);
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
 
   const [isLoadingBusiness, setIsLoadingBusiness] = useState(true);
   const [isSavingBusiness, setIsSavingBusiness] = useState(false);
 
-  const applyBusinessToForm = (
-    business: BusinessApiResponse,
-    fallbackBusinessType: string
-  ) => {
-    const syncedSettings = mapBusinessToSettings(
-      business,
-      fallbackBusinessType || DEFAULT_BUSINESS_TYPE
-    );
-
+  const applyBusinessToForm = (business: BusinessApiResponse) => {
     setBusinessSlug(business.slug || "");
     setUploadFileId(business.uploadFileId ?? null);
 
-    setBusinessName(syncedSettings.businessName);
-    setBusinessType(syncedSettings.businessType);
-    setPhone(syncedSettings.phone);
-    setAddress(syncedSettings.address);
-
-    localStorage.setItem("businessId", String(business.id));
-    localStorage.setItem("businessSlug", business.slug || "");
-
-    StorageService.saveSettings(syncedSettings);
+    setBusinessName(business.name || "");
+    setPhone(business.phone || "");
+    setAddress(business.address || "");
   };
 
   useEffect(() => {
     let isMounted = true;
 
     const loadBusinessSettings = async () => {
-      const localConfig = StorageService.getSettings();
-
-      setAccountEmail(getAccountEmailFromLocalStorage());
-      setBusinessName(localConfig.businessName);
-      setBusinessType(localConfig.businessType);
-      setPhone(localConfig.phone);
-      setAddress(localConfig.address);
-
       try {
         setIsLoadingBusiness(true);
 
-        const business = await getBusinessById();
+        const [authUser, business] = await Promise.all([
+          getAuthDetail(),
+          getBusinessById()
+        ]);
 
         if (!isMounted) return;
 
-        applyBusinessToForm(business, localConfig.businessType);
-
-        if (onSaveSuccess) {
-          onSaveSuccess();
-        }
+        setAccountEmail(authUser.email || "");
+        applyBusinessToForm(business);
       } catch (error) {
         if (!isMounted) return;
 
-        console.warn("İşletme bilgileri API'den alınamadı:", error);
+        console.error("İşletme bilgileri API'den alınamadı:", error);
 
         showToast(
-          "İşletme bilgileri API'den alınamadı. Local bilgiler gösteriliyor.",
-          "warning"
+          error instanceof Error
+            ? error.message
+            : "İşletme bilgileri API'den alınamadı.",
+          "error"
         );
       } finally {
         if (isMounted) {
@@ -122,12 +81,16 @@ export default function SettingsPage({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [showToast]);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!businessName.trim() || !phone.trim() || !address.trim()) {
+    const trimmedBusinessName = businessName.trim();
+    const trimmedPhone = phone.trim();
+    const trimmedAddress = address.trim();
+
+    if (!trimmedBusinessName || !trimmedPhone || !trimmedAddress) {
       showToast("Lütfen tüm zorunlu işletme ayarlarını doldurun.", "warning");
       return;
     }
@@ -136,46 +99,28 @@ export default function SettingsPage({
       setIsSavingBusiness(true);
 
       const updatedBusiness = await updateBusiness({
-        name: businessName.trim(),
-        address: address.trim(),
-        phone: phone.trim(),
+        name: trimmedBusinessName,
+        address: trimmedAddress,
+        phone: trimmedPhone,
         uploadFileId
       });
 
-      const updatedConfig: AppSettings = {
-        businessName: updatedBusiness.name || businessName.trim(),
-        businessType: businessType.trim() || DEFAULT_BUSINESS_TYPE,
-        phone: updatedBusiness.phone || phone.trim(),
-        address: updatedBusiness.address || address.trim()
-      };
-
-      setBusinessSlug(updatedBusiness.slug || "");
-      setUploadFileId(updatedBusiness.uploadFileId ?? null);
-
-      setBusinessName(updatedConfig.businessName);
-      setBusinessType(updatedConfig.businessType);
-      setPhone(updatedConfig.phone);
-      setAddress(updatedConfig.address);
-
-      localStorage.setItem("businessId", String(updatedBusiness.id));
-      localStorage.setItem("businessSlug", updatedBusiness.slug || "");
-
-      StorageService.saveSettings(updatedConfig);
+      applyBusinessToForm(updatedBusiness);
 
       if (onSaveSuccess) {
-        onSaveSuccess();
+        await onSaveSuccess();
       }
 
-      showToast("İşletme bilgileri başarıyla güncellendi.", "success");
+      showToast("İşletme bilgileri API üzerinde başarıyla güncellendi.", "success");
     } catch (error) {
       console.error("İşletme bilgileri kaydedilemedi:", error);
 
-      const message =
+      showToast(
         error instanceof Error
           ? error.message
-          : "İşletme bilgileri kaydedilirken hata oluştu.";
-
-      showToast(message, "error");
+          : "İşletme bilgileri kaydedilirken hata oluştu.",
+        "error"
+      );
     } finally {
       setIsSavingBusiness(false);
     }
@@ -192,7 +137,7 @@ export default function SettingsPage({
             </h2>
 
             <p className="text-xs text-zinc-500 mt-1">
-              İşletmenize ait temel bilgileri görüntüleyin ve güncelleyin.
+              İşletmenize ait temel bilgiler doğrudan backend API üzerinden görüntülenir ve güncellenir.
             </p>
           </div>
 
@@ -231,14 +176,14 @@ export default function SettingsPage({
 
               <input
                 type="email"
-                value={accountEmail || "E-posta bilgisi bulunamadı"}
+                value={accountEmail || "E-posta bilgisi API'den alınamadı"}
                 disabled
                 className="w-full pl-10 pr-3.5 py-2.5 bg-zinc-100 border border-zinc-200 rounded-lg text-sm text-zinc-500 cursor-not-allowed outline-none"
               />
             </div>
 
             <p className="mt-1.5 text-[11px] text-zinc-400 leading-relaxed">
-              Bu e-posta hesaba giriş yapmak için kullanılır. Şimdilik bu alandan değiştirilemez.
+              Bu bilgi Auth/Detail endpoint’i üzerinden okunur. Bu ekrandan değiştirilemez.
             </p>
           </div>
 
@@ -253,8 +198,9 @@ export default function SettingsPage({
                 required
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
+                disabled={isLoadingBusiness || isSavingBusiness}
                 placeholder="Örn: Emin Oto Lastik"
-                className="w-full bg-zinc-50 px-3.5 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                className="w-full bg-zinc-50 px-3.5 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:bg-white disabled:bg-zinc-100 disabled:text-zinc-500"
               />
             </div>
 
@@ -266,10 +212,13 @@ export default function SettingsPage({
               <input
                 type="text"
                 value={businessType}
-                onChange={(e) => setBusinessType(e.target.value)}
-                placeholder="Örn: Lastik Emanet, Rot Balans ve Servis"
-                className="w-full bg-zinc-50 px-3.5 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                disabled
+                className="w-full bg-zinc-100 px-3.5 py-2 text-sm border border-zinc-200 rounded-lg text-zinc-500 cursor-not-allowed outline-none"
               />
+
+              <p className="mt-1.5 text-[11px] text-zinc-400 leading-relaxed">
+                Business API içinde bu alan için kalıcı bir field olmadığı için local kayıt yapılmaz.
+              </p>
             </div>
 
             <div>
@@ -282,8 +231,9 @@ export default function SettingsPage({
                 required
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                disabled={isLoadingBusiness || isSavingBusiness}
                 placeholder="Örn: 0312 345 67 89"
-                className="w-full bg-zinc-50 px-3.5 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                className="w-full bg-zinc-50 px-3.5 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:bg-white disabled:bg-zinc-100 disabled:text-zinc-500"
               />
             </div>
           </div>
@@ -298,14 +248,15 @@ export default function SettingsPage({
               rows={3}
               value={address}
               onChange={(e) => setAddress(e.target.value)}
+              disabled={isLoadingBusiness || isSavingBusiness}
               placeholder="Makbuzun alt bandında çıkacak açık dükkan adresi..."
-              className="w-full bg-zinc-50 px-3.5 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:bg-white"
+              className="w-full bg-zinc-50 px-3.5 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:bg-white disabled:bg-zinc-100 disabled:text-zinc-500"
             />
           </div>
 
           <button
             type="submit"
-            disabled={isSavingBusiness}
+            disabled={isSavingBusiness || isLoadingBusiness}
             className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg shadow-sm hover:shadow-md cursor-pointer transition-all self-start"
           >
             {isSavingBusiness ? (
@@ -316,7 +267,7 @@ export default function SettingsPage({
             ) : (
               <>
                 <Save className="w-3.5 h-3.5" />
-                Değişiklikleri Kaydet
+                Değişiklikleri API'ye Kaydet
               </>
             )}
           </button>

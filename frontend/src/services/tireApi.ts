@@ -1,3 +1,5 @@
+import { getValidAccessToken } from "./authApi";
+
 const RAW_API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "https://gateway.teggsoft.com"
 ).replace(/\/$/, "");
@@ -163,15 +165,6 @@ export const searchPlaceholders = {
   tire: "Plaka, müşteri adı veya ebata göre ara..."
 };
 
-function getAccessToken() {
-  return (
-    localStorage.getItem("accessToken") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("authToken") ||
-    ""
-  );
-}
-
 function getErrorMessage(data: unknown) {
   if (!data || typeof data !== "object") {
     return "İşlem tamamlanamadı.";
@@ -229,14 +222,14 @@ async function request<T>(
   method: HttpMethod = "GET",
   body?: unknown
 ): Promise<T> {
-  const token = getAccessToken();
+  const token = await getValidAccessToken();
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     method,
     headers: {
       accept: "*/*",
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      Authorization: `Bearer ${token}`
     },
     body: body !== undefined ? JSON.stringify(body) : undefined
   });

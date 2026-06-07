@@ -43,7 +43,7 @@ function mapApiClientToCustomer(item: ClientListItemDto): Customer {
 function mapApiVehicleToVehicle(item: VehicleListItemDto): Vehicle {
   return {
     id: String(item.id),
-    customerId: String(item.clientId),
+    clientId: String(item.clientId),
     plate: item.licensePlate || "-",
     note: item.note || "",
     createdAt: item.createdDate
@@ -59,7 +59,7 @@ export default function CustomersPage({
   onOpenLabelPrinter,
   showToast
 }: CustomersPageProps) {
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(
+  const [selectedclientId, setSelectedclientId] = useState<string>(
     customers[0]?.id || ""
   );
 
@@ -86,7 +86,7 @@ export default function CustomersPage({
   const sourceCustomers = isApiLoaded ? apiCustomers : customers;
   const sourceVehicles = isApiLoaded ? apiVehicles : vehicles;
 
-  async function reloadCustomerAndVehicleData(selectCustomerId?: string) {
+  async function reloadCustomerAndVehicleData(selectclientId?: string) {
     try {
       setIsLoadingApiData(true);
       setApiError(null);
@@ -114,17 +114,17 @@ export default function CustomersPage({
       setApiVehicles(mappedVehicles);
       setIsApiLoaded(true);
 
-      if (selectCustomerId) {
-        setSelectedCustomerId(selectCustomerId);
+      if (selectclientId) {
+        setSelectedclientId(selectclientId);
         return;
       }
 
       const selectedCustomerStillExists = mappedCustomers.some(
-        (customer) => customer.id === selectedCustomerId
+        (customer) => customer.id === selectedclientId
       );
 
-      if (!selectedCustomerId || !selectedCustomerStillExists) {
-        setSelectedCustomerId(mappedCustomers[0]?.id || "");
+      if (!selectedclientId || !selectedCustomerStillExists) {
+        setSelectedclientId(mappedCustomers[0]?.id || "");
       }
     } catch (error) {
       console.error(error);
@@ -147,27 +147,27 @@ export default function CustomersPage({
   }, []);
 
   useEffect(() => {
-    if (selectedCustomerId) {
+    if (selectedclientId) {
       const selectedCustomerStillExists = sourceCustomers.some(
-        (customer) => customer.id === selectedCustomerId
+        (customer) => customer.id === selectedclientId
       );
 
       if (selectedCustomerStillExists) return;
     }
 
-    setSelectedCustomerId(sourceCustomers[0]?.id || "");
-  }, [sourceCustomers, selectedCustomerId]);
+    setSelectedclientId(sourceCustomers[0]?.id || "");
+  }, [sourceCustomers, selectedclientId]);
 
   const activeCustomer = sourceCustomers.find(
-    (customer) => customer.id === selectedCustomerId
+    (customer) => customer.id === selectedclientId
   );
 
   const activeCustomerVehicles = sourceVehicles.filter(
-    (vehicle) => vehicle.customerId === selectedCustomerId
+    (vehicle) => vehicle.clientId === selectedclientId
   );
 
   const activeCustomerRecords = records.filter(
-    (record) => record.customerId === selectedCustomerId
+    (record) => record.clientId === selectedclientId
   );
 
   const filteredCustomers = sourceCustomers.filter((customer) => {
@@ -179,7 +179,7 @@ export default function CustomersPage({
     const phoneMatch = customer.phone.toLowerCase().includes(query);
 
     const customerPlates = sourceVehicles.filter(
-      (vehicle) => vehicle.customerId === customer.id
+      (vehicle) => vehicle.clientId === customer.id
     );
 
     const plateMatch = customerPlates.some((vehicle) =>
@@ -264,14 +264,14 @@ export default function CustomersPage({
       return;
     }
 
-    if (!selectedCustomerId) {
+    if (!selectedclientId) {
       showToast("Lütfen önce bir müşteri seçin.", "warning");
       return;
     }
 
-    const numericCustomerId = Number(selectedCustomerId);
+    const numericclientId = Number(selectedclientId);
 
-    if (Number.isNaN(numericCustomerId)) {
+    if (Number.isNaN(numericclientId)) {
       showToast(
         "Seçili müşteri API kaydı değil. Lütfen müşteri listesini yenileyin.",
         "error"
@@ -285,7 +285,7 @@ export default function CustomersPage({
       const plateNormalized = formatPlate(trimmedPlateValue);
 
       await vehicleApi.addVehicle({
-        clientId: numericCustomerId,
+        clientId: numericclientId,
         licensePlate: plateNormalized,
         note: trimmedPlateNote,
         imageIds: []
@@ -297,7 +297,7 @@ export default function CustomersPage({
       setNewPlateNote("");
       setShowAddPlateForm(false);
 
-      await reloadCustomerAndVehicleData(selectedCustomerId);
+      await reloadCustomerAndVehicleData(selectedclientId);
       onRefreshData();
     } catch (error) {
       console.error(error);
@@ -367,11 +367,11 @@ export default function CustomersPage({
           ) : (
             filteredCustomers.map((customer) => {
               const count = records.filter(
-                (record) => record.customerId === customer.id
+                (record) => record.clientId === customer.id
               ).length;
 
               const plates = sourceVehicles
-                .filter((vehicle) => vehicle.customerId === customer.id)
+                .filter((vehicle) => vehicle.clientId === customer.id)
                 .map((vehicle) => vehicle.plate)
                 .join(", ");
 
@@ -379,9 +379,9 @@ export default function CustomersPage({
                 <button
                   key={customer.id}
                   type="button"
-                  onClick={() => setSelectedCustomerId(customer.id)}
+                  onClick={() => setSelectedclientId(customer.id)}
                   className={`w-full text-left p-4 flex items-center justify-between border-l-4 transition-all duration-150 ${
-                    selectedCustomerId === customer.id
+                    selectedclientId === customer.id
                       ? "bg-blue-50/60 border-blue-600 pl-4.5"
                       : "border-transparent hover:bg-slate-50/40 pl-4"
                   }`}

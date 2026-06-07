@@ -33,13 +33,13 @@ export default function RecordsPage({
 
   const getRecordCustomer = (record: TireRecord): Customer => {
     const matchedCustomer = customers.find(
-      (customer) => customer.id === record.customerId
+      (customer) => customer.id === record.clientId
     );
 
     if (matchedCustomer) return matchedCustomer;
 
     return {
-      id: record.customerId,
+      id: record.clientId,
       fullName: record.snapshot?.customerName || "Bilinmeyen Cari",
       phone: record.snapshot?.phone || "",
       createdAt: record.createdAt
@@ -55,7 +55,7 @@ export default function RecordsPage({
 
     return {
       id: record.vehicleId,
-      customerId: record.customerId,
+      clientId: record.clientId,
       plate: record.snapshot?.plate || "-",
       note: record.vehicleNote || record.snapshot?.vehicleNote || "",
       createdAt: record.createdAt

@@ -1,3 +1,5 @@
+import { getValidAccessToken } from "./authApi";
+
 const RAW_API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "https://gateway.teggsoft.com"
 ).replace(/\/$/, "");
@@ -41,15 +43,6 @@ export interface UploadedFileDto {
   details?: FileDetailDto[];
 }
 
-function getAccessToken() {
-  return (
-    localStorage.getItem("accessToken") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("authToken") ||
-    ""
-  );
-}
-
 function getErrorMessage(data: unknown) {
   if (!data || typeof data !== "object") {
     return "İşlem tamamlanamadı.";
@@ -84,13 +77,13 @@ async function requestJson<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getAccessToken();
+  const token = await getValidAccessToken();
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers: {
       accept: "*/*",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      Authorization: `Bearer ${token}`,
       ...(options.headers || {})
     }
   });
@@ -131,8 +124,8 @@ export function pickImagePreviewUrl(file?: UploadedFileDto | null) {
 }
 
 export const fileApi = {
-  uploadFile(file: File) {
-    const token = getAccessToken();
+  async uploadFile(file: File) {
+    const token = await getValidAccessToken();
 
     const formData = new FormData();
 
@@ -140,22 +133,22 @@ export const fileApi = {
     formData.append("DirectoryName", FILE_DIRECTORY_NAME);
     formData.append("File", file);
 
-    return fetch(`${API_BASE_URL}/tire/Files/Add`, {
+    const response = await fetch(`${API_BASE_URL}/tire/Files/Add`, {
       method: "POST",
       headers: {
         accept: "*/*",
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
+        Authorization: `Bearer ${token}`
       },
       body: formData
-    }).then(async (response) => {
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(data));
-      }
-
-      return data as UploadedFileDto;
     });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(getErrorMessage(data));
+    }
+
+    return data as UploadedFileDto;
   },
 
   getFile(id: number) {

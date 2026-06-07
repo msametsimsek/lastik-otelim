@@ -28,10 +28,10 @@ import {
   AppSettings,
   ToastMessage,
   AuthUser,
-  UserSubscription
+  UserSubscription,
+  TireType
 } from "./types";
 
-import { StorageService } from "./services/storageService";
 import { getBusinessById, mapBusinessToSettings } from "./services/businessApi";
 import { buildFilePublicUrl } from "./services/fileApi";
 import { generateId, normalizeTurkish } from "./utils/helpers";
@@ -53,6 +53,21 @@ import {
   TireListItemDto
 } from "./services/tireApi";
 
+const defaultSettings: AppSettings = {
+  businessName: "LastikOtelim",
+  businessType: "Oto Lastik & Rot Balans",
+  phone: "",
+  address: ""
+};
+
+const defaultSubscription: UserSubscription = {
+  id: "subscription-api-not-ready",
+  planId: null,
+  planName: "",
+  status: "inactive",
+  isActive: false
+};
+
 function mapApiUserToAuthUser(user: AuthApiUser): AuthUser {
   return {
     id: String(user.businessId),
@@ -71,18 +86,30 @@ function mapApiClientToCustomer(item: ClientListItemDto): Customer {
     id: String(item.id),
     fullName: item.name || "Bilinmeyen Cari",
     phone: item.phone || "",
-    createdAt: item.createdDate
+    createdAt: item.createdDate,
+    isActive: true
   };
 }
 
 function mapApiVehicleToVehicle(item: VehicleListItemDto): Vehicle {
   return {
     id: String(item.id),
-    customerId: String(item.clientId),
+    clientId: String(item.clientId),
     plate: item.licensePlate || "-",
     note: item.note || "",
     createdAt: item.createdDate
   };
+}
+
+function normalizeTireType(value?: string | null): TireType {
+  const normalizedValue = normalizeTurkish(value || "");
+
+  if (normalizedValue.includes("kis")) return "Kışlık";
+  if (normalizedValue.includes("4") || normalizedValue.includes("mevsim")) {
+    return "4 Mevsim";
+  }
+
+  return "Yazlık";
 }
 
 function getSafeFileUrl(file: Record<string, unknown>) {
@@ -152,9 +179,7 @@ function mapApiTireToRecord(
       : "";
 
   const matchedCustomerByVehicle = matchedVehicle
-    ? mappedCustomers.find(
-        (customer) => customer.id === matchedVehicle.customerId
-      )
+    ? mappedCustomers.find((customer) => customer.id === matchedVehicle.clientId)
     : undefined;
 
   const matchedCustomerByName = cleanClientName
@@ -200,14 +225,14 @@ function mapApiTireToRecord(
     }) || [];
 
   const tireCode = item.code || `LT-${item.id}`;
-  const tireType = item.brandConstantName || "Yazlık";
+  const tireType = normalizeTireType(item.brandConstantName);
   const brand = item.modelConstantName || "Belirtilmedi";
   const size = item.sizes || "Belirtilmedi";
   const quantity = item.count || 0;
 
   return {
     id: String(item.id),
-    customerId: matchedVehicle?.customerId || matchedCustomer?.id || "",
+    clientId: matchedVehicle?.clientId || matchedCustomer?.id || "",
     vehicleId: String(item.vehicleId),
     tireCode,
     tireType,
@@ -237,29 +262,23 @@ function mapApiTireToRecord(
 
 function getFallbackCustomer(record: TireRecord): Customer {
   return {
-    id: record.customerId,
+    id: record.clientId,
     fullName: record.snapshot?.customerName || "Bilinmeyen Cari",
     phone: record.snapshot?.phone || "",
-    createdAt: record.createdAt
+    createdAt: record.createdAt,
+    isActive: true
   };
 }
 
 function getFallbackVehicle(record: TireRecord): Vehicle {
   return {
     id: record.vehicleId,
-    customerId: record.customerId,
+    clientId: record.clientId,
     plate: record.snapshot?.plate || "-",
     note: record.vehicleNote || record.snapshot?.vehicleNote || "",
     createdAt: record.createdAt
   };
 }
-
-const defaultSettings: AppSettings = {
-  businessName: "LastikOtelim",
-  businessType: "Oto Lastik & Rot Balans",
-  phone: "",
-  address: ""
-};
 
 export default function App() {
   const [currentView, setCurrentView] = useState<
@@ -275,9 +294,8 @@ export default function App() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [tireRecords, setTireRecords] = useState<TireRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [subscription, setSubscription] = useState<UserSubscription>(
-    StorageService.getSubscription()
-  );
+  const [subscription, setSubscription] =
+    useState<UserSubscription>(defaultSubscription);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedDetailRecord, setSelectedDetailRecord] =
@@ -308,13 +326,6 @@ export default function App() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const syncLocalEntityData = () => {
-    setCustomers(StorageService.getCustomers());
-    setVehicles(StorageService.getVehicles());
-    setTireRecords(StorageService.getTireRecords());
-    setSubscription(StorageService.getSubscription());
-  };
-
   const syncBusinessSettings = async () => {
     try {
       const business = await getBusinessById();
@@ -341,7 +352,7 @@ export default function App() {
     }
   };
 
-  const syncPoolData = async () => {
+  const syncPoolData = async (): Promise<TireRecord[]> => {
     await syncBusinessSettings();
 
     try {
@@ -365,10 +376,23 @@ export default function App() {
       setCustomers(mappedCustomers);
       setVehicles(mappedVehicles);
       setTireRecords(mappedRecords);
-      setSubscription(StorageService.getSubscription());
+      setSubscription(defaultSubscription);
+
+      return mappedRecords;
     } catch (error) {
-      console.warn("API verileri alınamadı, local fallback kullanılıyor:", error);
-      syncLocalEntityData();
+      console.error("API verileri alınamadı:", error);
+
+      setCustomers([]);
+      setVehicles([]);
+      setTireRecords([]);
+      setSubscription(defaultSubscription);
+
+      showToast(
+        "Veriler API üzerinden alınamadı. Lütfen bağlantıyı veya oturumu kontrol edin.",
+        "error"
+      );
+
+      return [];
     }
   };
 
@@ -376,9 +400,6 @@ export default function App() {
     let isMounted = true;
 
     const initializeApp = async () => {
-      StorageService.initDatabase();
-      syncLocalEntityData();
-
       try {
         const storedUser = getStoredAuthUser();
 
@@ -392,11 +413,9 @@ export default function App() {
         if (!isMounted) return;
 
         setAuthUser(mapApiUserToAuthUser(verifiedUser));
-        await syncPoolData();
-
-        if (!isMounted) return;
-
         setCurrentView("app");
+
+        await syncPoolData();
       } catch {
         clearAuthSession();
 
@@ -406,6 +425,8 @@ export default function App() {
         setCustomers([]);
         setVehicles([]);
         setTireRecords([]);
+        setSettings(defaultSettings);
+        setSubscription(defaultSubscription);
         setCurrentView("landing");
       } finally {
         if (isMounted) {
@@ -452,11 +473,12 @@ export default function App() {
 
     if (apiUser) {
       setAuthUser(mapApiUserToAuthUser(apiUser));
-      setSubscription(StorageService.getSubscription());
     }
 
-    await syncPoolData();
+    setSubscription(defaultSubscription);
     setCurrentView("app");
+
+    await syncPoolData();
   };
 
   const handleLogout = async () => {
@@ -466,12 +488,13 @@ export default function App() {
       console.warn("RevokeToken isteği tamamlanamadı:", error);
     } finally {
       clearAuthSession();
-      StorageService.logout();
 
       setAuthUser(null);
       setCustomers([]);
       setVehicles([]);
       setTireRecords([]);
+      setSettings(defaultSettings);
+      setSubscription(defaultSubscription);
       setSelectedDetailRecord(null);
       setSelectedPrintRecord(null);
       setIsAddModalOpen(false);
@@ -503,14 +526,12 @@ export default function App() {
       (record) => record.createdAt.substring(0, 7) === currentISOMonth
     ).length;
 
-    const printedLabelsCount = StorageService.getPrintCounter();
-
     return {
       totalRecords,
       inStorage,
       totalCustomers,
       addedThisMonth,
-      printedLabelsCount
+      printedLabelsCount: 0
     };
   };
 
@@ -524,7 +545,7 @@ export default function App() {
       .slice(0, 5)
       .map((record) => {
         const customer =
-          customers.find((item) => item.id === record.customerId) ||
+          customers.find((item) => item.id === record.clientId) ||
           getFallbackCustomer(record);
 
         const vehicle =
@@ -560,12 +581,16 @@ export default function App() {
       return [newRecord, ...currentRecords];
     });
 
-    await syncPoolData();
+    const freshRecords = await syncPoolData();
+
     setIsAddModalOpen(false);
 
     if (autoPrint) {
+      const freshRecord =
+        freshRecords.find((record) => record.id === newRecord.id) || newRecord;
+
       setTimeout(() => {
-        setSelectedPrintRecord(newRecord);
+        setSelectedPrintRecord(freshRecord);
       }, 100);
     }
   };
@@ -580,27 +605,35 @@ export default function App() {
       )
     );
 
-    setSelectedDetailRecord(updatedRecord);
-    await syncPoolData();
+    const freshRecords = await syncPoolData();
+
+    const freshRecord =
+      freshRecords.find((record) => record.id === updatedRecord.id) ||
+      updatedRecord;
+
+    setSelectedDetailRecord(freshRecord);
 
     if (autoPrint) {
       setTimeout(() => {
-        setSelectedPrintRecord(updatedRecord);
+        setSelectedPrintRecord(freshRecord);
       }, 100);
     }
   };
 
   const handleIncrementPrint = () => {
-    StorageService.incrementPrintCounter();
-    setSubscription(StorageService.getSubscription());
+    /**
+     * Print sayacı için backend endpoint yoksa local sayaç tutulmaz.
+     * Bu nedenle burada kalıcı işlem yapılmıyor.
+     */
   };
 
   const handleResetDatabase = async () => {
-    StorageService.resetDatabase();
-    syncLocalEntityData();
+    showToast(
+      "Bulut verileri uygulama içinden sıfırlanamaz. Sadece API verileri yeniden yüklendi.",
+      "warning"
+    );
 
     await syncPoolData();
-
     setActiveTab("dashboard");
   };
 
@@ -608,9 +641,8 @@ export default function App() {
   const recentRecords = getRecentDeposits();
 
   const printCustomer = selectedPrintRecord
-    ? customers.find(
-        (customer) => customer.id === selectedPrintRecord.customerId
-      ) || getFallbackCustomer(selectedPrintRecord)
+    ? customers.find((customer) => customer.id === selectedPrintRecord.clientId) ||
+      getFallbackCustomer(selectedPrintRecord)
     : undefined;
 
   const printVehicle = selectedPrintRecord

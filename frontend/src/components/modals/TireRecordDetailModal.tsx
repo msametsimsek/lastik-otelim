@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   X,
   Edit2,
@@ -11,8 +11,9 @@ import {
   AlertTriangle,
   Eye
 } from "lucide-react";
+
 import { TireRecord, Customer, Vehicle, TirePhoto, TireType } from "../../types";
-import { StorageService } from "../../services/storageService";
+
 import {
   clientApi,
   vehicleApi,
@@ -20,12 +21,9 @@ import {
   constantApi,
   ConstantListItemDto
 } from "../../services/tireApi";
-import { formatDate, formatPlate } from "../../utils/helpers";
-import {
-  fileApi,
-  pickImagePreviewUrl,
-  buildFilePublicUrl
-} from "../../services/fileApi";
+
+import { formatDate, formatPlate, normalizeTurkish } from "../../utils/helpers";
+import { fileApi, pickImagePreviewUrl } from "../../services/fileApi";
 
 interface TireRecordDetailModalProps {
   record: TireRecord;
@@ -50,23 +48,29 @@ function isNumericId(value: string | number | null | undefined) {
   return value !== null && value !== undefined && /^\d+$/.test(String(value));
 }
 
+function getConstantLabel(item: ConstantListItemDto) {
+  return item.name || item.value || "";
+}
+
 function getConstantIdByName(
   constants: ConstantListItemDto[],
-  type: string,
+  type: "TIRE_TYPE" | "TIRE_BRAND",
   name: string
 ) {
-  const normalizedName = name.trim().toLowerCase();
+  const normalizedName = normalizeTurkish(name.trim());
 
-  return constants.find(
-    (item) =>
-      item.type === type &&
-      item.name.trim().toLowerCase() === normalizedName
-  )?.id;
+  return constants.find((item) => {
+    const itemName = normalizeTurkish(getConstantLabel(item));
+    return item.type === type && itemName === normalizedName;
+  })?.id;
 }
 
 function normalizeTireType(value: string | null | undefined): TireType {
-  if (value === "Yazlık" || value === "Kışlık" || value === "4 Mevsim") {
-    return value;
+  const normalizedValue = normalizeTurkish(value || "");
+
+  if (normalizedValue.includes("kis")) return "Kışlık";
+  if (normalizedValue.includes("4") || normalizedValue.includes("mevsim")) {
+    return "4 Mevsim";
   }
 
   return "Yazlık";
@@ -74,108 +78,59 @@ function normalizeTireType(value: string | null | undefined): TireType {
 
 function getFallbackCustomer(record: TireRecord): Customer {
   return {
-    id: record.customerId,
+    id: record.clientId,
     fullName: record.snapshot?.customerName || "Bilinmeyen Müşteri",
     phone: record.snapshot?.phone || "",
-    createdAt: record.createdAt
+    createdAt: record.createdAt,
+    isActive: true
   };
 }
 
 function getFallbackVehicle(record: TireRecord): Vehicle {
   return {
     id: record.vehicleId,
-    customerId: record.customerId,
+    clientId: record.clientId,
     plate: record.snapshot?.plate || "-",
     note: record.vehicleNote || record.snapshot?.vehicleNote || "",
     createdAt: record.createdAt
   };
 }
 
-function getSafeFileId(file: Record<string, unknown>) {
-  const rawFileId = file.fileId ?? file.id;
+function uniqueTextList(values: string[]) {
+  const seen = new Set<string>();
 
-  if (typeof rawFileId === "number") return rawFileId;
+  return values.filter((value) => {
+    const normalizedValue = normalizeTurkish(value);
 
-  if (typeof rawFileId === "string") {
-    const parsed = Number(rawFileId);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  return 0;
-}
-
-function getSafeString(file: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = file[key];
-
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
+    if (!normalizedValue || seen.has(normalizedValue)) {
+      return false;
     }
-  }
 
-  return "";
-}
-
-function getBestUploadFileUrl(file: Record<string, unknown>) {
-  const details = Array.isArray(file.details)
-    ? (file.details as Record<string, unknown>[])
-    : [];
-
-  const preferredDetail =
-    details.find((item) => item.imageSize === "small") ||
-    details.find((item) => item.imageSize === "medium") ||
-    details.find((item) => item.imageSize === "thumb") ||
-    details.find((item) => item.imageSize === "large") ||
-    details[0];
-
-  const detailFileUrl = preferredDetail
-    ? getSafeString(preferredDetail, ["fileUrl", "url", "filePath"])
-    : "";
-
-  if (detailFileUrl) return detailFileUrl;
-
-  return getSafeString(file, ["fileUrl", "url", "filePath"]);
-}
-
-function getSafeUploadFileName(file: Record<string, unknown>) {
-  return (
-    getSafeString(file, ["orginalName", "originalName", "fileName", "name"]) ||
-    "lastik-gorseli"
-  );
-}
-
-function mapUploadFileToTirePhoto(file: Record<string, unknown>): TirePhoto {
-  const fileId = getSafeFileId(file);
-  const fileUrl = getBestUploadFileUrl(file);
-  const fileName = getSafeUploadFileName(file);
-
-  return {
-    id: String(fileId || `${fileName}-${fileUrl}`),
-    fileId: fileId || undefined,
-    name: fileName,
-    type: "image/*",
-    dataUrl: buildFilePublicUrl(fileUrl),
-    fileUrl
-  };
+    seen.add(normalizedValue);
+    return true;
+  });
 }
 
 function uniquePhotosByFileId(photos: TirePhoto[]) {
   const seen = new Set<string>();
 
   return photos.filter((photo) => {
-    const key = photo.fileId ? `file-${photo.fileId}` : `local-${photo.id}`;
+    const key =
+      typeof photo.fileId === "number" && photo.fileId > 0
+        ? `file-${photo.fileId}`
+        : `photo-${photo.id}`;
 
-    if (seen.has(key)) return false;
+    if (seen.has(key)) {
+      return false;
+    }
 
     seen.add(key);
     return true;
   });
 }
 
-function getPhotoFileIds(photos: TirePhoto[]) {
-  return photos
-    .map((photo) => photo.fileId)
-    .filter((id): id is number => typeof id === "number" && id > 0);
+function uniqueNumberList(values: number[]) {
+  return Array.from(new Set(values.filter((value) => value > 0)));
 }
 
 export default function TireRecordDetailModal({
@@ -187,21 +142,13 @@ export default function TireRecordDetailModal({
 }: TireRecordDetailModalProps) {
   const [isEditMode, setIsEditMode] = useState(false);
 
-  const [customer, setCustomer] = useState<Customer | undefined>(() => {
-    const matchedCustomer = StorageService.getCustomers().find(
-      (item) => item.id === record.customerId
-    );
+  const [customer, setCustomer] = useState<Customer>(() =>
+    getFallbackCustomer(record)
+  );
 
-    return matchedCustomer || getFallbackCustomer(record);
-  });
-
-  const [vehicle, setVehicle] = useState<Vehicle | undefined>(() => {
-    const matchedVehicle = StorageService.getVehicles().find(
-      (item) => item.id === record.vehicleId
-    );
-
-    return matchedVehicle || getFallbackVehicle(record);
-  });
+  const [vehicle, setVehicle] = useState<Vehicle>(() =>
+    getFallbackVehicle(record)
+  );
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -214,7 +161,7 @@ export default function TireRecordDetailModal({
   const [vehicleNote, setVehicleNote] = useState("");
   const [photos, setPhotos] = useState<TirePhoto[]>([]);
   const [deletedFileIds, setDeletedFileIds] = useState<number[]>([]);
-  const [initialPhotoFileIds, setInitialPhotoFileIds] = useState<number[]>([]);
+  const [newUploadedFileIds, setNewUploadedFileIds] = useState<number[]>([]);
 
   const [constants, setConstants] = useState<ConstantListItemDto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -228,33 +175,56 @@ export default function TireRecordDetailModal({
     getCurrentDateTimeLocalValue
   );
 
+  const brandOptions = useMemo(() => {
+    const apiBrands = constants
+      .filter((item) => item.type === "TIRE_TYPE")
+      .map(getConstantLabel)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "tr"));
+
+    const mergedBrands = brand ? [brand, ...apiBrands] : apiBrands;
+
+    return uniqueTextList(mergedBrands);
+  }, [brand, constants]);
+
+  const seasonOptions = useMemo<TireType[]>(() => {
+    const apiSeasons = constants
+      .filter((item) => item.type === "TIRE_BRAND")
+      .map((item) => normalizeTireType(getConstantLabel(item)));
+
+    const mergedSeasons = uniqueTextList([
+      tireType,
+      ...apiSeasons,
+      "Yazlık",
+      "Kışlık",
+      "4 Mevsim"
+    ]);
+
+    return mergedSeasons.map(normalizeTireType);
+  }, [constants, tireType]);
+
   useEffect(() => {
-    const matchedCustomer =
-      StorageService.getCustomers().find((item) => item.id === record.customerId) ||
-      getFallbackCustomer(record);
+    const fallbackCustomer = getFallbackCustomer(record);
+    const fallbackVehicle = getFallbackVehicle(record);
 
-    const matchedVehicle =
-      StorageService.getVehicles().find((item) => item.id === record.vehicleId) ||
-      getFallbackVehicle(record);
+    setCustomer(fallbackCustomer);
+    setVehicle(fallbackVehicle);
 
-    setCustomer(matchedCustomer);
-    setVehicle(matchedVehicle);
-
-    setFullName(matchedCustomer.fullName || "");
-    setPhone(matchedCustomer.phone || "");
-    setPlate(matchedVehicle.plate || "");
+    setFullName(fallbackCustomer.fullName || "");
+    setPhone(fallbackCustomer.phone || "");
+    setPlate(fallbackVehicle.plate || "");
 
     setTireType(normalizeTireType(record.tireType));
     setBrand(record.brand || "");
     setSize(record.size || "");
     setQuantity(record.quantity || 1);
     setLocation(record.storageLocation || "");
-    setVehicleNote(record.vehicleNote || matchedVehicle.note || "");
-
-    const recordPhotos = uniquePhotosByFileId(record.photos || []);
-    setPhotos(recordPhotos);
-    setInitialPhotoFileIds(getPhotoFileIds(recordPhotos));
+    setVehicleNote(record.vehicleNote || fallbackVehicle.note || "");
+    setPhotos(uniquePhotosByFileId(record.photos || []));
     setDeletedFileIds([]);
+    setNewUploadedFileIds([]);
+    setDeliveryNote("");
+    setDeliveredAtDate(getCurrentDateTimeLocalValue());
 
     let isMounted = true;
 
@@ -269,43 +239,8 @@ export default function TireRecordDetailModal({
 
         if (!isMounted) return;
 
-        showToast(
-          "Marka ve mevsim sabitleri yüklenemedi. Düzenleme sırasında tekrar deneyin.",
-          "warning"
-        );
+        showToast("Marka ve mevsim seçenekleri yüklenemedi.", "warning");
       });
-
-    if (isNumericId(record.vehicleId)) {
-      vehicleApi
-        .getVehicleById(Number(record.vehicleId))
-        .then((response) => {
-          if (!isMounted) return;
-
-          const apiPhotos = uniquePhotosByFileId(
-            (response.uploadFiles || []).map((file) =>
-              mapUploadFileToTirePhoto(file as Record<string, unknown>)
-            )
-          );
-
-          setPhotos(apiPhotos);
-          setInitialPhotoFileIds(getPhotoFileIds(apiPhotos));
-          setDeletedFileIds([]);
-
-          setVehicle({
-            id: String(response.id),
-            customerId: String(response.clientId || record.customerId),
-            plate: response.licensePlate || matchedVehicle.plate || "-",
-            note: response.note || matchedVehicle.note || "",
-            createdAt: response.createdDate || matchedVehicle.createdAt
-          });
-
-          setVehicleNote(response.note || matchedVehicle.note || "");
-          setPlate(response.licensePlate || matchedVehicle.plate || "");
-        })
-        .catch((error) => {
-          console.warn("Araç detay görselleri alınamadı:", error);
-        });
-    }
 
     return () => {
       isMounted = false;
@@ -313,83 +248,92 @@ export default function TireRecordDetailModal({
   }, [record, showToast]);
 
   const handlePhotoUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+    if (!files) return;
 
     setIsUploading(true);
 
-    const uploadedPhotos: TirePhoto[] = [];
     let uploadedCount = 0;
+    const uploadedPhotos: TirePhoto[] = [...photos];
+    const uploadedFileIds: number[] = [];
 
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
 
-        if (!file.type.startsWith("image/")) {
-          showToast("Lütfen sadece görsel dosyası seçin.", "error");
-          continue;
-        }
-
-        try {
-          const localPreviewUrl = URL.createObjectURL(file);
-          const uploadedFile = await fileApi.uploadFile(file);
-          const backendPreviewUrl = pickImagePreviewUrl(uploadedFile);
-
-          uploadedPhotos.push({
-            id: String(uploadedFile.id),
-            fileId: uploadedFile.id,
-            name:
-              uploadedFile.orginalName || uploadedFile.originalName || file.name,
-            type: file.type,
-            dataUrl: backendPreviewUrl || localPreviewUrl,
-            fileUrl: uploadedFile.fileUrl
-          });
-
-          uploadedCount++;
-        } catch (error) {
-          console.error(error);
-
-          showToast(
-            error instanceof Error
-              ? error.message
-              : "Görsel yüklenirken beklenmeyen hata oluştu.",
-            "error"
-          );
-        }
+      if (!file.type.startsWith("image/")) {
+        showToast("Lütfen sadece görsel dosyası seçin.", "error");
+        continue;
       }
 
-      if (uploadedPhotos.length > 0) {
-        setPhotos((currentPhotos) =>
-          uniquePhotosByFileId([...currentPhotos, ...uploadedPhotos])
+      try {
+        const localPreviewUrl = URL.createObjectURL(file);
+        const uploadedFile = await fileApi.uploadFile(file);
+        const backendPreviewUrl = pickImagePreviewUrl(uploadedFile);
+
+        uploadedPhotos.push({
+          id: String(uploadedFile.id),
+          fileId: uploadedFile.id,
+          name: uploadedFile.orginalName || uploadedFile.originalName || file.name,
+          type: file.type,
+          dataUrl: backendPreviewUrl || localPreviewUrl,
+          fileUrl: uploadedFile.fileUrl
+        });
+
+        uploadedFileIds.push(uploadedFile.id);
+        uploadedCount++;
+      } catch (error) {
+        console.error(error);
+
+        showToast(
+          error instanceof Error
+            ? error.message
+            : "Görsel yüklenirken beklenmeyen hata oluştu.",
+          "error"
         );
       }
+    }
 
-      if (uploadedCount > 0) {
-        showToast(`${uploadedCount} yeni fotoğraf backend'e yüklendi.`, "success");
-      }
-    } finally {
-      setIsUploading(false);
+    setPhotos(uniquePhotosByFileId(uploadedPhotos));
+
+    if (uploadedFileIds.length > 0) {
+      setNewUploadedFileIds((currentIds) =>
+        uniqueNumberList([...currentIds, ...uploadedFileIds])
+      );
+    }
+
+    setIsUploading(false);
+
+    if (uploadedCount > 0) {
+      showToast(`${uploadedCount} yeni fotoğraf yüklendi.`, "success");
     }
   };
 
   const handleRemovePhoto = (id: string) => {
     const removedPhoto = photos.find((photo) => photo.id === id);
 
-    if (removedPhoto?.fileId) {
-      setDeletedFileIds((currentIds) => {
-        if (currentIds.includes(removedPhoto.fileId!)) {
-          return currentIds;
-        }
+    if (!removedPhoto) return;
 
-        return [...currentIds, removedPhoto.fileId!];
-      });
+    if (removedPhoto.fileId) {
+      setDeletedFileIds((currentIds) =>
+        currentIds.includes(removedPhoto.fileId!)
+          ? currentIds
+          : [...currentIds, removedPhoto.fileId!]
+      );
+
+      setNewUploadedFileIds((currentIds) =>
+        currentIds.filter((fileId) => fileId !== removedPhoto.fileId)
+      );
     }
 
-    setPhotos((currentPhotos) =>
-      currentPhotos.filter((photo) => photo.id !== id)
-    );
+    setPhotos((currentPhotos) => {
+      const filteredPhotos = removedPhoto.fileId
+        ? currentPhotos.filter((photo) => photo.fileId !== removedPhoto.fileId)
+        : currentPhotos.filter((photo) => photo.id !== id);
+
+      return uniquePhotosByFileId(filteredPhotos);
+    });
 
     showToast(
-      "Fotoğraf listeden çıkarıldı. Kalıcı silmek için değişiklikleri kaydedin.",
+      "Fotoğraf kayıttan çıkarıldı. Değişiklikleri kaydettiğinizde işlem uygulanacak.",
       "info"
     );
   };
@@ -403,12 +347,7 @@ export default function TireRecordDetailModal({
     const trimmedLocation = location.trim();
     const trimmedVehicleNote = vehicleNote.trim();
 
-    const currentPhotoFileIds = getPhotoFileIds(photos);
-
-    const imageIds = currentPhotoFileIds.filter(
-      (fileId) =>
-        !initialPhotoFileIds.includes(fileId) && !deletedFileIds.includes(fileId)
-    );
+    const imageIds = uniqueNumberList(newUploadedFileIds);
 
     if (
       !trimmedFullName ||
@@ -421,32 +360,18 @@ export default function TireRecordDetailModal({
       return;
     }
 
-    if (!customer || !vehicle) {
-      showToast("Müşteri veya araç bilgisi bulunamadı.", "error");
-      return;
-    }
-
     if (!isNumericId(record.id)) {
-      showToast(
-        "Lastik kayıt ID bilgisi geçersiz. Backend kaydı güncellenemedi.",
-        "error"
-      );
+      showToast("Lastik kayıt bilgisi geçersiz. Kayıt güncellenemedi.", "error");
       return;
     }
 
-    if (!isNumericId(record.customerId)) {
-      showToast(
-        "Müşteri ID bilgisi geçersiz. Backend müşteri kaydı güncellenemedi.",
-        "error"
-      );
+    if (!isNumericId(record.clientId)) {
+      showToast("Müşteri bilgisi geçersiz. Kayıt güncellenemedi.", "error");
       return;
     }
 
     if (!isNumericId(record.vehicleId)) {
-      showToast(
-        "Araç ID bilgisi geçersiz. Backend araç kaydı güncellenemedi.",
-        "error"
-      );
+      showToast("Araç bilgisi geçersiz. Kayıt güncellenemedi.", "error");
       return;
     }
 
@@ -464,65 +389,56 @@ export default function TireRecordDetailModal({
 
     if (modelConstantId === undefined) {
       showToast(
-        `"${trimmedBrand}" markası backend sabitlerinde bulunamadı. Lütfen geçerli bir marka yazın.`,
+        `"${trimmedBrand}" markası bulunamadı. Lütfen listeden geçerli bir marka seçin.`,
         "warning"
       );
       return;
     }
 
     if (brandConstantId === undefined) {
-      showToast(
-        `"${tireType}" mevsim türü backend sabitlerinde bulunamadı.`,
-        "warning"
-      );
+      showToast(`"${tireType}" mevsim türü bulunamadı.`, "warning");
       return;
     }
 
     try {
       setIsSaving(true);
 
-      const updatedClient = await clientApi.updateClient({
-        id: Number(record.customerId),
-        name: trimmedFullName,
-        phone: trimmedPhone,
-        note: ""
-      });
+      const [updatedClient, updatedVehicle, updatedTire] = await Promise.all([
+        clientApi.updateClient({
+          id: Number(record.clientId),
+          name: trimmedFullName,
+          phone: trimmedPhone,
+          note: ""
+        }),
 
-      const updatedVehicle = await vehicleApi.updateVehicle({
-        id: Number(record.vehicleId),
-        licensePlate: formattedPlate,
-        note: trimmedVehicleNote,
-        imageIds
-      });
+        vehicleApi.updateVehicle({
+          id: Number(record.vehicleId),
+          licensePlate: formattedPlate,
+          note: trimmedVehicleNote,
+          imageIds
+        }),
 
-      const updatedTire = await tireApi.updateTire({
-        id: Number(record.id),
-        modelConstantId,
-        brandConstantId,
-        sizes: trimmedSize,
-        count: Number(quantity),
-        storageLocation: trimmedLocation
-      });
+        tireApi.updateTire({
+          id: Number(record.id),
+          modelConstantId,
+          brandConstantId,
+          sizes: trimmedSize,
+          count: Number(quantity),
+          storageLocation: trimmedLocation
+        })
+      ]);
+
+      let failedDeleteCount = 0;
 
       if (deletedFileIds.length > 0) {
-      await Promise.all(deletedFileIds.map((fileId) => fileApi.deleteFile(fileId)));
-        }
+        const deleteResults = await Promise.allSettled(
+          uniqueNumberList(deletedFileIds).map((fileId) => fileApi.deleteFile(fileId))
+        );
 
-      const refreshedVehicle = await vehicleApi
-        .getVehicleById(Number(record.vehicleId))
-        .catch(() => updatedVehicle);
-
-      const freshPhotos = Array.isArray(refreshedVehicle.uploadFiles)
-        ? uniquePhotosByFileId(
-            refreshedVehicle.uploadFiles.map((file) =>
-              mapUploadFileToTirePhoto(file as Record<string, unknown>)
-            )
-          )
-        : uniquePhotosByFileId(
-            photos.filter((photo) =>
-              photo.fileId ? !deletedFileIds.includes(photo.fileId) : true
-            )
-          );
+        failedDeleteCount = deleteResults.filter(
+          (result) => result.status === "rejected"
+        ).length;
+      }
 
       const finalTireType = normalizeTireType(
         updatedTire.brandConstantName || tireType
@@ -538,35 +454,38 @@ export default function TireRecordDetailModal({
           ? updatedTire.storageLocation
           : trimmedLocation;
 
-      const finalVehicleNote = refreshedVehicle.note || trimmedVehicleNote;
-      const finalPlate = refreshedVehicle.licensePlate || formattedPlate;
+      const finalVehicleNote = updatedVehicle.note || trimmedVehicleNote;
+      const finalPlate = updatedVehicle.licensePlate || formattedPlate;
+
+      const finalPhotos = uniquePhotosByFileId(photos);
 
       const updatedCustomer: Customer = {
         id: String(updatedClient.id),
         fullName: updatedClient.name || trimmedFullName,
         phone: updatedClient.phone || trimmedPhone,
-        createdAt: updatedClient.createdDate || customer.createdAt
+        createdAt: updatedClient.createdDate || customer.createdAt,
+        isActive: true
       };
 
       const updatedVehicleModel: Vehicle = {
-        id: String(refreshedVehicle.id),
-        customerId: String(refreshedVehicle.clientId || record.customerId),
+        id: String(updatedVehicle.id),
+        clientId: String(updatedVehicle.clientId || record.clientId),
         plate: finalPlate,
         note: finalVehicleNote,
-        createdAt: refreshedVehicle.createdDate || vehicle.createdAt
+        createdAt: updatedVehicle.createdDate || vehicle.createdAt
       };
 
       const updatedRecord: TireRecord = {
         ...record,
-        customerId: String(updatedClient.id),
-        vehicleId: String(refreshedVehicle.id || updatedVehicle.id),
+        clientId: String(updatedClient.id),
+        vehicleId: String(updatedVehicle.id),
         tireType: finalTireType,
         brand: finalBrand,
         size: finalSize,
         quantity: finalQuantity,
         storageLocation: finalStorageLocation,
         vehicleNote: finalVehicleNote,
-        photos: freshPhotos,
+        photos: finalPhotos,
         updatedAt: new Date().toISOString(),
         snapshot: {
           customerName: updatedClient.name || trimmedFullName,
@@ -584,12 +503,20 @@ export default function TireRecordDetailModal({
 
       setCustomer(updatedCustomer);
       setVehicle(updatedVehicleModel);
-      setPhotos(freshPhotos);
-      setInitialPhotoFileIds(getPhotoFileIds(freshPhotos));
+      setPhotos(finalPhotos);
       setDeletedFileIds([]);
+      setNewUploadedFileIds([]);
 
       onUpdate(updatedRecord, autoPrint);
-      showToast("Kayıt değişiklikleri backend'e başarıyla kaydedildi.", "success");
+
+      if (failedDeleteCount > 0) {
+        showToast(
+          "Kayıt güncellendi fakat bazı fotoğraflar kalıcı olarak silinemedi.",
+          "warning"
+        );
+      } else {
+        showToast("Kayıt değişiklikleri başarıyla kaydedildi.", "success");
+      }
 
       if (!autoPrint) {
         setIsEditMode(false);
@@ -609,68 +536,13 @@ export default function TireRecordDetailModal({
   };
 
   const handleDeliverRecord = () => {
-    try {
-      const snapshotInfo = {
-        customerName: customer?.fullName || "Bilinmeyen Müşteri",
-        phone: customer?.phone || "-",
-        plate: vehicle?.plate || "-",
-        tireCode: record.tireCode,
-        tireType: record.tireType,
-        brand: record.brand,
-        size: record.size,
-        quantity: record.quantity,
-        storageLocation: record.storageLocation,
-        vehicleNote: record.vehicleNote || vehicle?.note || ""
-      };
+    setIsDeliverConfirmOpen(false);
 
-      const deliveredAtIso = new Date(deliveredAtDate).toISOString();
-
-      const updatedRecord: TireRecord = {
-        ...record,
-        status: "delivered",
-        deliveredAt: deliveredAtIso,
-        deletedAt: deliveredAtIso,
-        deliveryNote: deliveryNote.trim() || undefined,
-        snapshot: snapshotInfo,
-        updatedAt: new Date().toISOString()
-      };
-
-      StorageService.updateTireRecord(updatedRecord);
-      onUpdate(updatedRecord, false);
-
-      showToast(`${record.tireCode} kodlu emanet başarıyla teslim edildi.`, "success");
-
-      setIsDeliverConfirmOpen(false);
-      onClose();
-    } catch (error) {
-      console.error(error);
-      showToast("Emanet teslim edilirken hata oluştu.", "error");
-    }
-  };
-
-  if (!customer || !vehicle) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/60 backdrop-blur-xs">
-        <div className="bg-white p-6 rounded-2xl max-w-sm text-center shadow-xl">
-          <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-2" />
-
-          <h4 className="font-bold text-zinc-900">Kayıt Yüklenemedi</h4>
-
-          <p className="text-xs text-zinc-500 mt-1">
-            İlişkili müşteri veya araç bilgileri bulunamadı.
-          </p>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="mt-4 px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-xs font-semibold rounded-lg"
-          >
-            Kapat
-          </button>
-        </div>
-      </div>
+    showToast(
+      "Teslim edildi özelliği henüz aktif değil. Kayıt üzerinde değişiklik yapılmadı.",
+      "warning"
     );
-  }
+  };
 
   const visibleVehicleNote = record.vehicleNote || vehicle.note || "";
 
@@ -790,23 +662,21 @@ export default function TireRecordDetailModal({
                     </label>
 
                     <div className="grid grid-cols-3 gap-1">
-                      {(["Yazlık", "Kışlık", "4 Mevsim"] as TireType[]).map(
-                        (type) => (
-                          <button
-                            key={type}
-                            type="button"
-                            onClick={() => setTireType(type)}
-                            disabled={isSaving}
-                            className={`py-1.5 px-2 text-xs font-bold border rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${
-                              tireType === type
-                                ? "bg-blue-600 border-blue-600 text-white"
-                                : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
-                            }`}
-                          >
-                            {type}
-                          </button>
-                        )
-                      )}
+                      {seasonOptions.map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => setTireType(type)}
+                          disabled={isSaving}
+                          className={`py-1.5 px-2 text-xs font-bold border rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${
+                            tireType === type
+                              ? "bg-blue-600 border-blue-600 text-white"
+                              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
+                          }`}
+                        >
+                          {type}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
@@ -815,14 +685,30 @@ export default function TireRecordDetailModal({
                       Lastik Markası *
                     </label>
 
-                    <input
-                      type="text"
-                      value={brand}
-                      onChange={(e) => setBrand(e.target.value)}
-                      disabled={isSaving}
-                      placeholder="Michelin, Petlas vb..."
-                      className="w-full px-3.5 py-2 text-sm bg-white border border-slate-205 rounded-xl text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all disabled:bg-slate-100"
-                    />
+                    {brandOptions.length > 0 ? (
+                      <select
+                        value={brand}
+                        onChange={(e) => setBrand(e.target.value)}
+                        disabled={isSaving}
+                        className="w-full px-3.5 py-2 text-sm bg-white border border-slate-205 rounded-xl text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all disabled:bg-slate-100"
+                      >
+                        <option value="">Marka seçin</option>
+                        {brandOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={brand}
+                        onChange={(e) => setBrand(e.target.value)}
+                        disabled={isSaving}
+                        placeholder="Marka listesi yüklenemedi"
+                        className="w-full px-3.5 py-2 text-sm bg-white border border-slate-205 rounded-xl text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all disabled:bg-slate-100"
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -903,7 +789,11 @@ export default function TireRecordDetailModal({
                     ) : (
                       photos.map((photo) => (
                         <div
-                          key={photo.id}
+                          key={
+                            typeof photo.fileId === "number"
+                              ? `file-${photo.fileId}`
+                              : photo.id
+                          }
                           className="relative group w-14 h-14 rounded-lg overflow-hidden border border-slate-200 bg-white flex-shrink-0"
                         >
                           <img
@@ -915,7 +805,11 @@ export default function TireRecordDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => handleRemovePhoto(photo.id)}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              handleRemovePhoto(photo.id);
+                            }}
                             disabled={isSaving}
                             className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity cursor-pointer disabled:cursor-not-allowed"
                           >
@@ -929,7 +823,7 @@ export default function TireRecordDetailModal({
 
                 {isUploading && (
                   <div className="text-xs text-blue-600 font-bold animate-pulse">
-                    Fotoğraflar backend'e yükleniyor...
+                    Fotoğraflar yükleniyor...
                   </div>
                 )}
               </div>
@@ -1129,7 +1023,11 @@ export default function TireRecordDetailModal({
                   <div className="grid grid-cols-4 gap-2.5">
                     {photos.map((photo) => (
                       <div
-                        key={photo.id}
+                        key={
+                          typeof photo.fileId === "number"
+                            ? `file-${photo.fileId}`
+                            : photo.id
+                        }
                         className="relative group aspect-square rounded-xl overflow-hidden border border-slate-200 bg-white cursor-zoom-in hover:shadow-md transition-shadow"
                         onClick={() => setActivePhotoUrl(photo.dataUrl)}
                       >
@@ -1244,8 +1142,8 @@ export default function TireRecordDetailModal({
                   </h4>
 
                   <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-500">
-                    Bu işlem kaydı aktif depo listesinden düşürür. Teslim tarihi
-                    ve notu arşiv bilgisine işlenir.
+                    Bu özellik henüz aktif değil. Onaylarsanız kayıt üzerinde
+                    değişiklik yapılmayacak.
                   </p>
                 </div>
               </div>
@@ -1293,7 +1191,7 @@ export default function TireRecordDetailModal({
                   onClick={handleDeliverRecord}
                   className="inline-flex h-11 items-center justify-center rounded-2xl bg-rose-600 px-4 text-xs font-black text-white shadow-lg shadow-rose-600/20 hover:bg-rose-500"
                 >
-                  Teslim Edildi Olarak Kaydet
+                  Devam Et
                 </button>
               </div>
             </div>

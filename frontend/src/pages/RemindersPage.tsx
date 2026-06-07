@@ -55,15 +55,14 @@ interface ReminderItem {
   seasonEndDate: Date;
 }
 
-const REMINDER_STORAGE_KEY = "lastikotelim_reminder_statuses";
 const WARNING_THRESHOLD_DAYS = 20;
 
 function getCurrentSeasonReminderRange(today = new Date()): SeasonReminderRange {
   const year = today.getFullYear();
 
-  const summerStartThisYear = new Date(year, 3, 15); // 15 Nisan
-  const winterStartThisYear = new Date(year, 10, 15); // 15 Kasım
-  const winterEndNextYear = new Date(year + 1, 3, 15); // 15 Nisan
+  const summerStartThisYear = new Date(year, 3, 15);
+  const winterStartThisYear = new Date(year, 10, 15);
+  const winterEndNextYear = new Date(year + 1, 3, 15);
 
   const summerStartNextYear = new Date(year + 1, 3, 15);
   const winterStartNextYear = new Date(year + 1, 10, 15);
@@ -117,6 +116,18 @@ function normalizePhoneForWhatsApp(phone: string) {
   return digitsOnly;
 }
 
+function normalizeSearchText(value: string) {
+  return value
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .trim();
+}
+
 function formatDate(dateValue: string | Date) {
   const date = typeof dateValue === "string" ? new Date(dateValue) : dateValue;
 
@@ -145,19 +156,6 @@ function getDayDiff(targetDate: Date, fromDate = new Date()) {
   const diff = cleanTarget.getTime() - cleanFrom.getTime();
 
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-function getReminderStatuses(): Record<string, ReminderStatus> {
-  try {
-    const raw = localStorage.getItem(REMINDER_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveReminderStatuses(statuses: Record<string, ReminderStatus>) {
-  localStorage.setItem(REMINDER_STORAGE_KEY, JSON.stringify(statuses));
 }
 
 function buildReminderMessage(params: {
@@ -202,10 +200,6 @@ export default function RemindersPage({
     "all" | "warning" | ReminderStatus
   >("all");
 
-  const [statuses, setStatuses] = useState<Record<string, ReminderStatus>>(
-    () => getReminderStatuses()
-  );
-
   const seasonRange = useMemo(() => getCurrentSeasonReminderRange(), []);
   const daysUntilSeason = getDayDiff(seasonRange.start);
 
@@ -217,14 +211,13 @@ export default function RemindersPage({
   const reminders = useMemo<ReminderItem[]>(() => {
     return activeRecords
       .map((record) => {
-        const customer = customers.find((item) => item.id === record.customerId);
+        const customer = customers.find((item) => item.id === record.clientId);
         const vehicle = vehicles.find((item) => item.id === record.vehicleId);
 
         if (!customer || customer.isActive === false) return null;
 
         const reminderId = `${record.id}_${customer.id}_${seasonRange.type}_${seasonRange.start.getFullYear()}`;
-        const status = statuses[reminderId] || "pending";
-        const plate = vehicle?.plate || "Plaka belirtilmedi";
+        const plate = vehicle?.plate || record.snapshot?.plate || "Plaka belirtilmedi";
         const businessName = settings.businessName || "LastikOtelim";
         const remainingDays = getDayDiff(seasonRange.start);
 
@@ -249,7 +242,7 @@ export default function RemindersPage({
           customer,
           vehicle,
           record,
-          status,
+          status: "pending",
           message,
           daysUntilSeason: remainingDays,
           urgency,
@@ -266,7 +259,6 @@ export default function RemindersPage({
     customers,
     vehicles,
     settings.businessName,
-    statuses,
     seasonRange.type,
     seasonRange.title,
     seasonRange.label,
@@ -275,7 +267,7 @@ export default function RemindersPage({
   ]);
 
   const filteredReminders = reminders.filter((item) => {
-    const query = searchTerm.trim().toLowerCase();
+    const query = normalizeSearchText(searchTerm);
 
     const matchesFilter =
       activeFilter === "all" ||
@@ -284,12 +276,20 @@ export default function RemindersPage({
         item.status === "pending" &&
         item.urgency !== "safe");
 
-    const matchesSearch =
-      !query ||
-      item.customer.fullName.toLowerCase().includes(query) ||
-      item.customer.phone.toLowerCase().includes(query) ||
-      item.vehicle?.plate.toLowerCase().includes(query) ||
-      item.record.tireCode.toLowerCase().includes(query);
+    const searchableText = normalizeSearchText(
+      [
+        item.customer.fullName,
+        item.customer.phone,
+        item.vehicle?.plate || "",
+        item.record.snapshot?.plate || "",
+        item.record.tireCode,
+        item.record.brand,
+        item.record.size,
+        item.record.storageLocation || ""
+      ].join(" ")
+    );
+
+    const matchesSearch = !query || searchableText.includes(query);
 
     return matchesFilter && matchesSearch;
   });
@@ -302,26 +302,18 @@ export default function RemindersPage({
   const completedCount = reminders.filter((item) => item.status === "sent").length;
   const cancelledCount = reminders.filter((item) => item.status === "cancelled").length;
 
-  const updateReminderStatus = (id: string, status: ReminderStatus) => {
-    const nextStatuses = {
-      ...statuses,
-      [id]: status
-    };
+  const updateReminderStatus = (status: ReminderStatus) => {
+    const statusLabel =
+      status === "sent"
+        ? "hatırlatma yapıldı"
+        : status === "cancelled"
+          ? "hatırlatma iptal edildi"
+          : "bekleyenlere alındı";
 
-    setStatuses(nextStatuses);
-    saveReminderStatuses(nextStatuses);
-
-    if (status === "sent") {
-      showToast("Hatırlatma yapıldı olarak işaretlendi.", "success");
-    }
-
-    if (status === "cancelled") {
-      showToast("Hatırlatma iptal edildi.", "info");
-    }
-
-    if (status === "pending") {
-      showToast("Hatırlatma tekrar bekleyenlere alındı.", "info");
-    }
+    showToast(
+      `Bu işlem için backend reminder endpoint'i henüz bağlı değil. "${statusLabel}" durumu localStorage'a yazılmadı.`,
+      "warning"
+    );
   };
 
   const openWhatsApp = (item: ReminderItem) => {
@@ -335,6 +327,11 @@ export default function RemindersPage({
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(item.message)}`;
 
     window.open(url, "_blank", "noopener,noreferrer");
+
+    showToast(
+      "WhatsApp açıldı. Hatırlatma durumu backend endpoint'i gelene kadar kaydedilmez.",
+      "info"
+    );
   };
 
   const seasonStatusText =
@@ -368,10 +365,10 @@ export default function RemindersPage({
               </h1>
 
               <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-500">
-                Tüm aktif lastik kayıtları burada listelenir. Sistem güncel tarihe göre
-                yazlık veya kışlık geçiş dönemini otomatik seçer, kalan gün sayısını
-                gösterir ve 20 gün altına düşünce işletmeye WhatsApp hatırlatması
-                yapması gerektiğini belirtir.
+                Tüm aktif lastik kayıtları API’den gelen verilerle listelenir.
+                Sistem güncel tarihe göre yazlık veya kışlık geçiş dönemini
+                otomatik seçer. Hatırlatma durumu için backend endpoint’i gelene
+                kadar hiçbir bilgi localStorage’a yazılmaz.
               </p>
             </div>
 
@@ -423,6 +420,7 @@ export default function RemindersPage({
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => setActiveFilter("warning")}
                   className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white transition-all hover:bg-amber-700 active:scale-[0.98]"
                 >
@@ -465,6 +463,7 @@ export default function RemindersPage({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative w-full lg:max-w-md">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
@@ -486,6 +485,7 @@ export default function RemindersPage({
               return (
                 <button
                   key={filter.id}
+                  type="button"
                   onClick={() =>
                     setActiveFilter(filter.id as "all" | "warning" | ReminderStatus)
                   }
@@ -587,7 +587,9 @@ export default function RemindersPage({
 
                       <span className="inline-flex items-center gap-1.5 rounded-xl bg-slate-50 px-3 py-2">
                         <UserRound className="h-3.5 w-3.5" />
-                        {item.vehicle?.plate || "Plaka yok"}
+                        {item.vehicle?.plate ||
+                          item.record.snapshot?.plate ||
+                          "Plaka yok"}
                       </span>
                     </div>
                   </div>
@@ -600,9 +602,11 @@ export default function RemindersPage({
                     <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                       Dönem Başlangıcı
                     </p>
+
                     <p className="mt-1 text-xs font-black text-slate-800">
                       {formatDate(item.seasonStartDate)}
                     </p>
+
                     <p className="mt-1 text-[10px] font-black text-slate-400">
                       {item.seasonLabel}
                     </p>
@@ -613,10 +617,12 @@ export default function RemindersPage({
                   <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                     <div className="flex items-start gap-3">
                       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+
                       <div>
                         <p className="text-sm font-black text-amber-900">
                           Bu müşteriye hatırlatma yapılabilir.
                         </p>
+
                         <p className="mt-1 text-xs font-semibold leading-5 text-amber-700">
                           {item.seasonLabel} dönemine 20 günden az kaldı. WhatsApp
                           üzerinden randevu hatırlatması yapmanız önerilir.
@@ -631,6 +637,7 @@ export default function RemindersPage({
                     <p className="text-[10px] uppercase tracking-wider text-slate-400">
                       Lastik Türü
                     </p>
+
                     <p className="mt-1 text-slate-800">{item.record.tireType}</p>
                   </div>
 
@@ -638,6 +645,7 @@ export default function RemindersPage({
                     <p className="text-[10px] uppercase tracking-wider text-slate-400">
                       LastikCode
                     </p>
+
                     <p className="mt-1 text-slate-800">{item.record.tireCode}</p>
                   </div>
 
@@ -645,13 +653,17 @@ export default function RemindersPage({
                     <p className="text-[10px] uppercase tracking-wider text-slate-400">
                       Kayıt Tarihi
                     </p>
-                    <p className="mt-1 text-slate-800">{formatDate(item.record.createdAt)}</p>
+
+                    <p className="mt-1 text-slate-800">
+                      {formatDate(item.record.createdAt)}
+                    </p>
                   </div>
 
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-slate-400">
                       Depo Konumu
                     </p>
+
                     <p className="mt-1 text-slate-800">
                       {item.record.storageLocation || "Belirtilmedi"}
                     </p>
@@ -671,6 +683,7 @@ export default function RemindersPage({
 
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <button
+                    type="button"
                     onClick={() => openWhatsApp(item)}
                     className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white shadow-md shadow-emerald-600/15 transition-all hover:bg-emerald-700 active:scale-[0.98]"
                   >
@@ -679,7 +692,8 @@ export default function RemindersPage({
                   </button>
 
                   <button
-                    onClick={() => updateReminderStatus(item.id, "sent")}
+                    type="button"
+                    onClick={() => updateReminderStatus("sent")}
                     className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-black text-emerald-700 transition-all hover:bg-emerald-50 active:scale-[0.98]"
                   >
                     <CheckCircle2 className="h-4 w-4" />
@@ -688,7 +702,8 @@ export default function RemindersPage({
 
                   {item.status !== "cancelled" ? (
                     <button
-                      onClick={() => updateReminderStatus(item.id, "cancelled")}
+                      type="button"
+                      onClick={() => updateReminderStatus("cancelled")}
                       className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-600 transition-all hover:bg-slate-50 active:scale-[0.98]"
                     >
                       <XCircle className="h-4 w-4" />
@@ -696,7 +711,8 @@ export default function RemindersPage({
                     </button>
                   ) : (
                     <button
-                      onClick={() => updateReminderStatus(item.id, "pending")}
+                      type="button"
+                      onClick={() => updateReminderStatus("pending")}
                       className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-black text-blue-700 transition-all hover:bg-blue-50 active:scale-[0.98]"
                     >
                       <ShieldCheck className="h-4 w-4" />

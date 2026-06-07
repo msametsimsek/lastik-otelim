@@ -9,7 +9,7 @@ export type Customer = {
 
 export type Vehicle = {
   id: string;
-  customerId: string;
+  clientId: string;
   plate: string;
   note?: string;
   createdAt: string;
@@ -29,7 +29,7 @@ export type TireType = "Yazlık" | "Kışlık" | "4 Mevsim";
 
 export type TireRecord = {
   id: string;
-  customerId: string;
+  clientId: string;
   vehicleId: string;
   tireCode: string;
   tireType: TireType;
