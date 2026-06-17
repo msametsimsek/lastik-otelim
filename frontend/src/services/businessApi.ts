@@ -2,7 +2,7 @@ import { AppSettings } from "../types";
 import { getValidAccessToken } from "./authApi";
 
 const RAW_API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "https://gateway.teggsoft.com"
+  import.meta.env.VITE_API_BASE_URL || "https://gateway.megriva.com"
 ).replace(/\/$/, "");
 
 const API_BASE_URL = RAW_API_BASE_URL.endsWith("/tire")

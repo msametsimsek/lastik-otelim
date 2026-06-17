@@ -795,10 +795,10 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
           <p className="text-xs font-bold text-slate-400">
             © 2026 LastikOtelim.{" "}
             <a
-              href="https://teggsoft.com"
+              href="https://megriva.com"
               className="text-slate-600 hover:text-blue-700"
             >
-              TeggSoft
+              Megriva
             </a>
           </p>
         </div>

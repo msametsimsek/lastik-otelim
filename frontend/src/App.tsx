@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 
 import AppLayout from "./components/layout/AppLayout";
+
 import DashboardPage from "./pages/DashboardPage";
-import RecordsPage from "./pages/RecordsPage";
 import CustomersPage from "./pages/CustomersPage";
+import VehiclesPage from "./pages/VehiclesPage";
 import StoragePage from "./pages/StoragePage";
-import SettingsPage from "./pages/SettingsPage";
-import SubscriptionPage from "./pages/SubscriptionPage";
+import HistoryPage from "./pages/HistoryPage";
 import RemindersPage from "./pages/RemindersPage";
+import SubscriptionPage from "./pages/SubscriptionPage";
+import SettingsPage from "./pages/SettingsPage";
 
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
@@ -289,6 +291,7 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [searchRedirectQuery, setSearchRedirectQuery] = useState("");
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -560,13 +563,13 @@ export default function App() {
       });
   };
 
-  const handleDashboardSearchRedirect = (
-    targetTab: "records" | "storage" | "customers",
-    query: string
-  ) => {
-    setSearchRedirectQuery(query);
-    setActiveTab(targetTab);
-  };
+const handleDashboardSearchRedirect = (
+  targetTab: "storage" | "customers",
+  query: string
+) => {
+  setSearchRedirectQuery(query);
+  setActiveTab(targetTab);
+};
 
   const handleAddNewRecord = async (newRecord: TireRecord, autoPrint: boolean) => {
     setTireRecords((currentRecords) => {
@@ -582,6 +585,7 @@ export default function App() {
     });
 
     const freshRecords = await syncPoolData();
+    setHistoryRefreshKey((currentKey) => currentKey + 1);
 
     setIsAddModalOpen(false);
 
@@ -606,6 +610,7 @@ export default function App() {
     );
 
     const freshRecords = await syncPoolData();
+    setHistoryRefreshKey((currentKey) => currentKey + 1);
 
     const freshRecord =
       freshRecords.find((record) => record.id === updatedRecord.id) ||
@@ -618,6 +623,11 @@ export default function App() {
         setSelectedPrintRecord(freshRecord);
       }, 100);
     }
+  };
+
+  const handleDeliveredRecord = async () => {
+    await syncPoolData();
+    setHistoryRefreshKey((currentKey) => currentKey + 1);
   };
 
   const handleIncrementPrint = () => {
@@ -715,21 +725,9 @@ export default function App() {
           <DashboardPage
             stats={activeStats}
             recentRecords={recentRecords}
-            subscription={subscription}
+            historyRefreshKey={historyRefreshKey}
             onAddTireClick={() => setIsAddModalOpen(true)}
-            onOpenSubscription={() => setActiveTab("subscription")}
             onSearchRedirect={handleDashboardSearchRedirect}
-            onOpenDetail={(record) => setSelectedDetailRecord(record)}
-            onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
-          />
-        )}
-
-        {activeTab === "records" && (
-          <RecordsPage
-            records={tireRecords}
-            customers={customers}
-            vehicles={vehicles}
-            initialSearchQuery={searchRedirectQuery}
             onOpenDetail={(record) => setSelectedDetailRecord(record)}
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
           />
@@ -757,6 +755,18 @@ export default function App() {
           />
         )}
 
+        {activeTab === "vehicles" && (
+          <VehiclesPage
+            vehicles={vehicles}
+            customers={customers}
+            records={tireRecords}
+            onRefreshData={syncPoolData}
+            onOpenDetail={(record) => setSelectedDetailRecord(record)}
+            onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
+            showToast={showToast}
+          />
+        )}
+
         {activeTab === "storage" && (
           <StoragePage
             records={tireRecords}
@@ -767,6 +777,8 @@ export default function App() {
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
           />
         )}
+
+        {activeTab === "history" && <HistoryPage />}
 
         {activeTab === "subscription" && (
           <SubscriptionPage
@@ -798,6 +810,7 @@ export default function App() {
           record={selectedDetailRecord}
           onClose={() => setSelectedDetailRecord(null)}
           onUpdate={handleUpdateRecord}
+          onDelivered={handleDeliveredRecord}
           showToast={showToast}
           onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
         />

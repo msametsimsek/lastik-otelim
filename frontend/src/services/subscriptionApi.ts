@@ -47,7 +47,7 @@ export interface InitializeSubscriptionPaymentResponse {
  *
  * Endpoint hazır olduğunda .env içine özel olarak eklenmeli:
  *
- * VITE_SUBSCRIPTION_PAYMENT_INITIALIZE_URL=https://gateway.teggsoft.com/tire/...
+ * VITE_SUBSCRIPTION_PAYMENT_INITIALIZE_URL=https://gateway.megriva.com/tire/...
  */
 const SUBSCRIPTION_PAYMENT_INITIALIZE_URL =
   import.meta.env.VITE_SUBSCRIPTION_PAYMENT_INITIALIZE_URL || "";

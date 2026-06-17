@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   X,
   Edit2,
@@ -28,7 +28,8 @@ import { fileApi, pickImagePreviewUrl } from "../../services/fileApi";
 interface TireRecordDetailModalProps {
   record: TireRecord;
   onClose: () => void;
-  onUpdate: (updatedRecord: TireRecord, autoPrint: boolean) => void;
+  onUpdate: (updatedRecord: TireRecord, autoPrint: boolean) => Promise<void>;
+  onDelivered: () => Promise<void>;
   showToast: (
     msg: string,
     type: "success" | "error" | "info" | "warning"
@@ -36,13 +37,6 @@ interface TireRecordDetailModalProps {
   onOpenLabelPrinter: (rec: TireRecord) => void;
 }
 
-function getCurrentDateTimeLocalValue() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  const localDate = new Date(now.getTime() - offset * 60 * 1000);
-
-  return localDate.toISOString().slice(0, 16);
-}
 
 function isNumericId(value: string | number | null | undefined) {
   return value !== null && value !== undefined && /^\d+$/.test(String(value));
@@ -111,14 +105,19 @@ function uniqueTextList(values: string[]) {
   });
 }
 
+function getPhotoFileId(photo: TirePhoto): number | null {
+  const rawId = photo.fileId ?? photo.id;
+  const parsedId = typeof rawId === "number" ? rawId : Number(rawId);
+
+  return Number.isInteger(parsedId) && parsedId > 0 ? parsedId : null;
+}
+
 function uniquePhotosByFileId(photos: TirePhoto[]) {
   const seen = new Set<string>();
 
   return photos.filter((photo) => {
-    const key =
-      typeof photo.fileId === "number" && photo.fileId > 0
-        ? `file-${photo.fileId}`
-        : `photo-${photo.id}`;
+    const fileId = getPhotoFileId(photo);
+    const key = fileId ? `file-${fileId}` : `photo-${photo.id}`;
 
     if (seen.has(key)) {
       return false;
@@ -137,6 +136,7 @@ export default function TireRecordDetailModal({
   record,
   onClose,
   onUpdate,
+  onDelivered,
   showToast,
   onOpenLabelPrinter
 }: TireRecordDetailModalProps) {
@@ -161,7 +161,6 @@ export default function TireRecordDetailModal({
   const [vehicleNote, setVehicleNote] = useState("");
   const [photos, setPhotos] = useState<TirePhoto[]>([]);
   const [deletedFileIds, setDeletedFileIds] = useState<number[]>([]);
-  const [newUploadedFileIds, setNewUploadedFileIds] = useState<number[]>([]);
 
   const [constants, setConstants] = useState<ConstantListItemDto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -170,10 +169,14 @@ export default function TireRecordDetailModal({
   const [activePhotoUrl, setActivePhotoUrl] = useState<string | null>(null);
 
   const [isDeliverConfirmOpen, setIsDeliverConfirmOpen] = useState(false);
-  const [deliveryNote, setDeliveryNote] = useState("");
-  const [deliveredAtDate, setDeliveredAtDate] = useState(
-    getCurrentDateTimeLocalValue
-  );
+
+
+  const showToastRef = useRef(showToast);
+
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
+
 
   const brandOptions = useMemo(() => {
     const apiBrands = constants
@@ -203,6 +206,8 @@ export default function TireRecordDetailModal({
     return mergedSeasons.map(normalizeTireType);
   }, [constants, tireType]);
 
+  const recordId = String(record.id);
+
   useEffect(() => {
     const fallbackCustomer = getFallbackCustomer(record);
     const fallbackVehicle = getFallbackVehicle(record);
@@ -222,10 +227,14 @@ export default function TireRecordDetailModal({
     setVehicleNote(record.vehicleNote || fallbackVehicle.note || "");
     setPhotos(uniquePhotosByFileId(record.photos || []));
     setDeletedFileIds([]);
-    setNewUploadedFileIds([]);
-    setDeliveryNote("");
-    setDeliveredAtDate(getCurrentDateTimeLocalValue());
 
+    // Form yalnızca farklı bir kayıt açıldığında sıfırlanır.
+    // Üst bileşenin yeniden render olması, düzenleme sırasında silinen
+    // fotoğrafları record.photos üzerinden geri yüklememelidir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordId]);
+
+  useEffect(() => {
     let isMounted = true;
 
     constantApi
@@ -239,98 +248,98 @@ export default function TireRecordDetailModal({
 
         if (!isMounted) return;
 
-        showToast("Marka ve mevsim seçenekleri yüklenemedi.", "warning");
+        showToastRef.current(
+          "Marka ve mevsim seçenekleri yüklenemedi.",
+          "warning"
+        );
       });
 
     return () => {
       isMounted = false;
     };
-  }, [record, showToast]);
+  }, []);
 
   const handlePhotoUpload = async (files: FileList | null) => {
-    if (!files) return;
+    if (!files || files.length === 0) return;
 
     setIsUploading(true);
 
+    const uploadedPhotos: TirePhoto[] = [];
     let uploadedCount = 0;
-    const uploadedPhotos: TirePhoto[] = [...photos];
-    const uploadedFileIds: number[] = [];
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
 
-      if (!file.type.startsWith("image/")) {
-        showToast("Lütfen sadece görsel dosyası seçin.", "error");
-        continue;
+        if (!file.type.startsWith("image/")) {
+          showToast("Lütfen sadece görsel dosyası seçin.", "error");
+          continue;
+        }
+
+        try {
+          const localPreviewUrl = URL.createObjectURL(file);
+          const uploadedFile = await fileApi.uploadFile(file);
+          const backendPreviewUrl = pickImagePreviewUrl(uploadedFile);
+
+          uploadedPhotos.push({
+            id: String(uploadedFile.id),
+            fileId: uploadedFile.id,
+            name:
+              uploadedFile.orginalName || uploadedFile.originalName || file.name,
+            type: file.type,
+            dataUrl: backendPreviewUrl || localPreviewUrl,
+            fileUrl: uploadedFile.fileUrl
+          });
+
+          uploadedCount++;
+        } catch (error) {
+          console.error(error);
+
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "Görsel yüklenirken beklenmeyen hata oluştu.",
+            "error"
+          );
+        }
       }
 
-      try {
-        const localPreviewUrl = URL.createObjectURL(file);
-        const uploadedFile = await fileApi.uploadFile(file);
-        const backendPreviewUrl = pickImagePreviewUrl(uploadedFile);
-
-        uploadedPhotos.push({
-          id: String(uploadedFile.id),
-          fileId: uploadedFile.id,
-          name: uploadedFile.orginalName || uploadedFile.originalName || file.name,
-          type: file.type,
-          dataUrl: backendPreviewUrl || localPreviewUrl,
-          fileUrl: uploadedFile.fileUrl
-        });
-
-        uploadedFileIds.push(uploadedFile.id);
-        uploadedCount++;
-      } catch (error) {
-        console.error(error);
-
-        showToast(
-          error instanceof Error
-            ? error.message
-            : "Görsel yüklenirken beklenmeyen hata oluştu.",
-          "error"
+      if (uploadedPhotos.length > 0) {
+        setPhotos((currentPhotos) =>
+          uniquePhotosByFileId([...currentPhotos, ...uploadedPhotos])
         );
       }
-    }
 
-    setPhotos(uniquePhotosByFileId(uploadedPhotos));
-
-    if (uploadedFileIds.length > 0) {
-      setNewUploadedFileIds((currentIds) =>
-        uniqueNumberList([...currentIds, ...uploadedFileIds])
-      );
-    }
-
-    setIsUploading(false);
-
-    if (uploadedCount > 0) {
-      showToast(`${uploadedCount} yeni fotoğraf yüklendi.`, "success");
+      if (uploadedCount > 0) {
+        showToast(`${uploadedCount} yeni fotoğraf yüklendi.`, "success");
+      }
+    } finally {
+      setIsUploading(false);
     }
   };
 
-  const handleRemovePhoto = (id: string) => {
-    const removedPhoto = photos.find((photo) => photo.id === id);
+  const handleRemovePhoto = (photoToRemove: TirePhoto) => {
+    const removedFileId = getPhotoFileId(photoToRemove);
 
-    if (!removedPhoto) return;
-
-    if (removedPhoto.fileId) {
+    if (removedFileId !== null) {
       setDeletedFileIds((currentIds) =>
-        currentIds.includes(removedPhoto.fileId!)
-          ? currentIds
-          : [...currentIds, removedPhoto.fileId!]
-      );
-
-      setNewUploadedFileIds((currentIds) =>
-        currentIds.filter((fileId) => fileId !== removedPhoto.fileId)
+        uniqueNumberList([...currentIds, removedFileId])
       );
     }
 
-    setPhotos((currentPhotos) => {
-      const filteredPhotos = removedPhoto.fileId
-        ? currentPhotos.filter((photo) => photo.fileId !== removedPhoto.fileId)
-        : currentPhotos.filter((photo) => photo.id !== id);
+    setPhotos((currentPhotos) =>
+      uniquePhotosByFileId(
+        currentPhotos.filter((photo) => {
+          const currentFileId = getPhotoFileId(photo);
 
-      return uniquePhotosByFileId(filteredPhotos);
-    });
+          if (removedFileId !== null && currentFileId !== null) {
+            return currentFileId !== removedFileId;
+          }
+
+          return String(photo.id) !== String(photoToRemove.id);
+        })
+      )
+    );
 
     showToast(
       "Fotoğraf kayıttan çıkarıldı. Değişiklikleri kaydettiğinizde işlem uygulanacak.",
@@ -347,7 +356,14 @@ export default function TireRecordDetailModal({
     const trimmedLocation = location.trim();
     const trimmedVehicleNote = vehicleNote.trim();
 
-    const imageIds = uniqueNumberList(newUploadedFileIds);
+    const deletedIdSet = new Set(uniqueNumberList(deletedFileIds));
+
+    const imageIds = uniqueNumberList(
+      photos
+        .map(getPhotoFileId)
+        .filter((fileId): fileId is number => fileId !== null)
+        .filter((fileId) => !deletedIdSet.has(fileId))
+    );
 
     if (
       !trimmedFullName ||
@@ -403,36 +419,38 @@ export default function TireRecordDetailModal({
     try {
       setIsSaving(true);
 
-      const [updatedClient, updatedVehicle, updatedTire] = await Promise.all([
-        clientApi.updateClient({
-          id: Number(record.clientId),
-          name: trimmedFullName,
-          phone: trimmedPhone,
-          note: ""
-        }),
+      const updatedVehicle = await vehicleApi.updateVehicle({
+        id: Number(record.vehicleId),
+        licensePlate: formattedPlate,
+        note: trimmedVehicleNote,
+        imageIds
+      });
 
-        vehicleApi.updateVehicle({
-          id: Number(record.vehicleId),
-          licensePlate: formattedPlate,
-          note: trimmedVehicleNote,
-          imageIds
-        }),
+      const updatedClient = await clientApi.updateClient({
+        id: Number(record.clientId),
+        name: trimmedFullName,
+        phone: trimmedPhone,
+        note: ""
+      });
 
-        tireApi.updateTire({
-          id: Number(record.id),
-          modelConstantId,
-          brandConstantId,
-          sizes: trimmedSize,
-          count: Number(quantity),
-          storageLocation: trimmedLocation
-        })
-      ]);
+      const updatedTire = await tireApi.updateTire({
+        id: Number(record.id),
+        modelConstantId,
+        brandConstantId,
+        sizes: trimmedSize,
+        count: Number(quantity),
+        storageLocation: trimmedLocation
+      });
 
       let failedDeleteCount = 0;
 
-      if (deletedFileIds.length > 0) {
+      const fileIdsToDelete = uniqueNumberList(deletedFileIds).filter(
+        (fileId) => !imageIds.includes(fileId)
+      );
+
+      if (fileIdsToDelete.length > 0) {
         const deleteResults = await Promise.allSettled(
-          uniqueNumberList(deletedFileIds).map((fileId) => fileApi.deleteFile(fileId))
+          fileIdsToDelete.map((fileId) => fileApi.deleteFile(fileId))
         );
 
         failedDeleteCount = deleteResults.filter(
@@ -457,7 +475,12 @@ export default function TireRecordDetailModal({
       const finalVehicleNote = updatedVehicle.note || trimmedVehicleNote;
       const finalPlate = updatedVehicle.licensePlate || formattedPlate;
 
-      const finalPhotos = uniquePhotosByFileId(photos);
+      const finalPhotos = uniquePhotosByFileId(
+        photos.filter((photo) => {
+          const fileId = getPhotoFileId(photo);
+          return fileId === null || !deletedIdSet.has(fileId);
+        })
+      );
 
       const updatedCustomer: Customer = {
         id: String(updatedClient.id),
@@ -505,9 +528,8 @@ export default function TireRecordDetailModal({
       setVehicle(updatedVehicleModel);
       setPhotos(finalPhotos);
       setDeletedFileIds([]);
-      setNewUploadedFileIds([]);
-
-      onUpdate(updatedRecord, autoPrint);
+  
+      await onUpdate(updatedRecord, autoPrint);
 
       if (failedDeleteCount > 0) {
         showToast(
@@ -535,13 +557,41 @@ export default function TireRecordDetailModal({
     }
   };
 
-  const handleDeliverRecord = () => {
-    setIsDeliverConfirmOpen(false);
+  const handleDeliverRecord = async () => {
+    if (!isNumericId(record.id)) {
+      showToast(
+        "Lastik kayıt bilgisi geçersiz. Teslim işlemi yapılamadı.",
+        "error"
+      );
+      return;
+    }
 
-    showToast(
-      "Teslim edildi özelliği henüz aktif değil. Kayıt üzerinde değişiklik yapılmadı.",
-      "warning"
-    );
+    try {
+      setIsSaving(true);
+
+      await tireApi.deleteTire(Number(record.id));
+      await onDelivered();
+
+      setIsDeliverConfirmOpen(false);
+
+      showToast(
+        "Lastik müşteriye teslim edildi ve aktif emanetlerden çıkarıldı.",
+        "success"
+      );
+
+      onClose();
+    } catch (error) {
+      console.error(error);
+
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Teslim işlemi sırasında beklenmeyen bir hata oluştu.",
+        "error"
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const visibleVehicleNote = record.vehicleNote || vehicle.note || "";
@@ -808,12 +858,13 @@ export default function TireRecordDetailModal({
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              handleRemovePhoto(photo.id);
+                              handleRemovePhoto(photo);
                             }}
                             disabled={isSaving}
-                            className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity cursor-pointer disabled:cursor-not-allowed"
+                            aria-label={`${photo.name} görselini kaldır`}
+                            className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-rose-600 text-white shadow-md transition-all hover:bg-rose-700 active:scale-95 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                            <Trash2 className="h-3.5 w-3.5 text-white" />
                           </button>
                         </div>
                       ))
@@ -1142,38 +1193,9 @@ export default function TireRecordDetailModal({
                   </h4>
 
                   <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-500">
-                    Bu özellik henüz aktif değil. Onaylarsanız kayıt üzerinde
-                    değişiklik yapılmayacak.
+                    Kayıt aktif emanetlerden çıkarılacak ve işlem geçmişine
+                    teslim/çıkış hareketi olarak kaydedilecektir.
                   </p>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">
-                    Teslim Tarihi
-                  </label>
-
-                  <input
-                    type="datetime-local"
-                    value={deliveredAtDate}
-                    onChange={(e) => setDeliveredAtDate(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">
-                    Teslim Notu
-                  </label>
-
-                  <textarea
-                    value={deliveryNote}
-                    onChange={(e) => setDeliveryNote(e.target.value)}
-                    rows={3}
-                    placeholder="Örn: Müşteri lastikleri eksiksiz teslim aldı."
-                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500"
-                  />
                 </div>
               </div>
 
@@ -1181,7 +1203,8 @@ export default function TireRecordDetailModal({
                 <button
                   type="button"
                   onClick={() => setIsDeliverConfirmOpen(false)}
-                  className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 hover:bg-slate-50"
+                  disabled={isSaving}
+                  className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Vazgeç
                 </button>
@@ -1189,9 +1212,10 @@ export default function TireRecordDetailModal({
                 <button
                   type="button"
                   onClick={handleDeliverRecord}
-                  className="inline-flex h-11 items-center justify-center rounded-2xl bg-rose-600 px-4 text-xs font-black text-white shadow-lg shadow-rose-600/20 hover:bg-rose-500"
+                  disabled={isSaving}
+                  className="inline-flex h-11 items-center justify-center rounded-2xl bg-rose-600 px-4 text-xs font-black text-white shadow-lg shadow-rose-600/20 hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Devam Et
+                  {isSaving ? "Teslim Ediliyor..." : "Teslim Et"}
                 </button>
               </div>
             </div>

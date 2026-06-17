@@ -1,7 +1,7 @@
 import { getValidAccessToken } from "./authApi";
 
 const RAW_API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "https://gateway.teggsoft.com"
+  import.meta.env.VITE_API_BASE_URL || "https://gateway.megriva.com"
 ).replace(/\/$/, "");
 
 const API_BASE_URL = RAW_API_BASE_URL.endsWith("/tire")
@@ -24,6 +24,28 @@ export interface GetListParams {
   page?: number;
   pageSize?: number;
   searchKey?: string;
+}
+
+export interface HistoryListParams extends GetListParams {
+  count?: number;
+  typeConstantValue?: string;
+}
+
+export interface HistoryListItemDto {
+  id: number;
+  clientName: string;
+  licensePlate: string;
+  model: string;
+  brand: string;
+  count: number;
+  sizes: string;
+  code: string;
+  typeConstantValue: string;
+  typeConstantName: string;
+  storageLocation: string | null;
+  businessId: number;
+  createdDate: string;
+  createdUsername: string;
 }
 
 export interface UploadFileDetailDto {
@@ -106,7 +128,7 @@ export interface ConstantListItemDto {
   id: number;
   name: string;
   value: string;
-  type: "TIRE_TYPE" | "TIRE_BRAND" | string;
+  type: "TIRE_TYPE" | "TIRE_BRAND" | "HISTORY_TYPE" | string;
   createdDate: string;
 }
 
@@ -165,7 +187,11 @@ export const searchPlaceholders = {
   tire: "Plaka, müşteri adı veya ebata göre ara..."
 };
 
-function getErrorMessage(data: unknown) {
+function getErrorMessage(data: unknown): string {
+  if (typeof data === "string" && data.trim()) {
+    return data.trim();
+  }
+
   if (!data || typeof data !== "object") {
     return "İşlem tamamlanamadı.";
   }
@@ -182,27 +208,28 @@ function getErrorMessage(data: unknown) {
     errors?: Record<string, string[]>;
   };
 
-  if (errorData.message) return errorData.message;
-  if (errorData.Message) return errorData.Message;
-  if (errorData.error) return errorData.error;
-  if (errorData.Error) return errorData.Error;
-  if (errorData.title) return errorData.title;
-  if (errorData.Title) return errorData.Title;
-  if (errorData.detail) return errorData.detail;
-  if (errorData.Detail) return errorData.Detail;
+  const directMessage =
+    errorData.message ||
+    errorData.Message ||
+    errorData.error ||
+    errorData.Error ||
+    errorData.detail ||
+    errorData.Detail ||
+    errorData.title ||
+    errorData.Title;
 
-  if (errorData.errors) {
-    const firstError = Object.values(errorData.errors).flat()[0];
-
-    if (firstError) {
-      return firstError;
-    }
+  if (directMessage) {
+    return directMessage;
   }
 
-  return "İşlem tamamlanamadı.";
+  const firstValidationError = errorData.errors
+    ? Object.values(errorData.errors).flat()[0]
+    : undefined;
+
+  return firstValidationError || "İşlem tamamlanamadı.";
 }
 
-function buildGetListQuery(params: GetListParams = {}) {
+function buildGetListQuery(params: GetListParams = {}): string {
   const query = new URLSearchParams();
 
   query.set("pageRequest.Page", String(params.page ?? 0));
@@ -217,6 +244,36 @@ function buildGetListQuery(params: GetListParams = {}) {
   return query.toString();
 }
 
+function buildHistoryListQuery(params: HistoryListParams = {}): string {
+  const query = new URLSearchParams(buildGetListQuery(params));
+
+  if (typeof params.count === "number") {
+    query.set("Count", String(params.count));
+  }
+
+  const typeConstantValue = params.typeConstantValue?.trim();
+
+  if (typeConstantValue) {
+    query.set("TypeConstantValue", typeConstantValue);
+  }
+
+  return query.toString();
+}
+
+async function parseResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 async function request<T>(
   endpoint: string,
   method: HttpMethod = "GET",
@@ -224,17 +281,22 @@ async function request<T>(
 ): Promise<T> {
   const token = await getValidAccessToken();
 
+  const headers: HeadersInit = {
+    accept: "*/*",
+    Authorization: `Bearer ${token}`
+  };
+
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     method,
-    headers: {
-      accept: "*/*",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined
   });
 
-  const data = await response.json().catch(() => null);
+  const data = await parseResponseBody(response);
 
   if (!response.ok) {
     throw new Error(getErrorMessage(data));
@@ -267,7 +329,7 @@ export const vehicleApi = {
   },
 
   getVehicleById(id: number) {
-    return request<VehicleListItemDto>(`/tire/Vehicle/GetById?id=${id}`);
+    return request<VehicleListItemDto>(`/tire/Vehicle/GetById?Id=${id}`);
   },
 
   addVehicle(payload: CreateVehiclePayload) {
@@ -311,5 +373,21 @@ export const tireApi = {
 
   updateTire(payload: UpdateTirePayload) {
     return request<TireListItemDto>("/tire/Tire/Update", "PUT", payload);
+  },
+
+  deleteTire(id: number) {
+    return request<void>("/tire/Tire/Delete", "DELETE", { id });
+  }
+};
+
+export const historyApi = {
+  getHistories(params: HistoryListParams = {}) {
+    return request<PaginatedResponse<HistoryListItemDto>>(
+      `/tire/History/GetList?${buildHistoryListQuery(params)}`
+    );
+  },
+
+  getHistoryById(id: number) {
+    return request<HistoryListItemDto>(`/tire/History/GetById?Id=${id}`);
   }
 };

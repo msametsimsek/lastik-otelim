@@ -100,12 +100,12 @@ export interface UserSubscription {
 export type ActiveTab =
   | "dashboard"
   | "add-tire"
-  | "records"
+  | "reminders"
   | "customers"
+  | "vehicles"
   | "storage"
   | "subscription"
-  | "settings"
-  | "reminders";
+  | "settings";
 
 export interface AuthUser {
   id: string;

@@ -5,7 +5,7 @@
   </p>
 
   <p>
-    <strong>TeggSoft Creative Agency</strong> tarafından geliştirilmiştir.
+    <strong>Megriva Yazılımve Dijital Çözümler</strong> tarafından geliştirilmiştir.
   </p>
 </div>
 
@@ -115,9 +115,9 @@ src/
 
 ## Marka
 
-Bu proje **TeggSoft** çatısı altında geliştirilmiştir.
+Bu proje **Megriva** çatısı altında geliştirilmiştir.
 
-**TeggSoft Creative Agency**, işletmelere özel modern yazılım çözümleri, web uygulamaları ve dijital yönetim sistemleri geliştirir.
+**Megriva Yazılım ve Dijital**, işletmelere özel modern yazılım çözümleri, web uygulamaları ve dijital yönetim sistemleri geliştirir.
 
 ---
 
@@ -131,7 +131,7 @@ v2.0.3
 
 ## Geliştirici
 
-**TeggSoft Creative Agency**
+**Megriva Yazılım ve Dijital Çözümler**
 
 ---
 

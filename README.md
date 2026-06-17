@@ -56,7 +56,7 @@ Tamamlanan ana entegrasyonlar:
 Frontend API adresi `.env` dosyası üzerinden yönetilir.
 
 ```env
-VITE_API_BASE_URL=https://gateway.teggsoft.com/tire
+VITE_API_BASE_URL=https://gateway.megriva.com/tire
 ```
 
 Aktif kullanılan endpointler:
@@ -97,7 +97,7 @@ http://localhost:3000
 `frontend/.env` dosyası içinde şu değer bulunmalıdır:
 
 ```env
-VITE_API_BASE_URL=https://gateway.teggsoft.com/tire
+VITE_API_BASE_URL=https://gateway.megriva.com/tire
 ```
 
 Güvenlik nedeniyle `.env` dosyaları repoya gönderilmemelidir.
@@ -139,11 +139,11 @@ Sıradaki planlanan entegrasyonlar:
 
 ## Geliştirici Notu
 
-Bu proje TeggSoft ekosistemi içerisinde geliştirilen SaaS tabanlı işletme yönetim projelerinden biridir. Amaç, lastik işletmelerinin günlük operasyonlarını sade, hızlı ve güvenilir bir panel üzerinden yönetebilmesini sağlamaktır.
+Bu proje Megriva ekosistemi içerisinde geliştirilen SaaS tabanlı işletme yönetim projelerinden biridir. Amaç, lastik işletmelerinin günlük operasyonlarını sade, hızlı ve güvenilir bir panel üzerinden yönetebilmesini sağlamaktır.
 
 ---
 
 ## Geliştirici
 
 **Samet Şimşek**
-TeggSoft Creative Agency
+Megriva Creative Agency
