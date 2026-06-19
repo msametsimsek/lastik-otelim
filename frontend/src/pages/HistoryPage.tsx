@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode
+} from "react";
+
 import {
   Activity,
+  ArrowLeft,
   Calendar,
   Car,
   CheckCircle,
@@ -53,7 +60,8 @@ function getHistoryVisual(type: string) {
     case "add":
       return {
         label: "Yeni Kayıt",
-        badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+        badgeClass:
+          "border-emerald-200 bg-emerald-50 text-emerald-700",
         iconClass: "bg-emerald-100 text-emerald-600",
         Icon: PlusCircle
       };
@@ -61,7 +69,8 @@ function getHistoryVisual(type: string) {
     case "update":
       return {
         label: "Düzenleme",
-        badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+        badgeClass:
+          "border-amber-200 bg-amber-50 text-amber-700",
         iconClass: "bg-amber-100 text-amber-600",
         Icon: PencilLine
       };
@@ -69,7 +78,8 @@ function getHistoryVisual(type: string) {
     case "delete":
       return {
         label: "Teslim Edildi",
-        badgeClass: "border-rose-200 bg-rose-50 text-rose-700",
+        badgeClass:
+          "border-rose-200 bg-rose-50 text-rose-700",
         iconClass: "bg-rose-100 text-rose-600",
         Icon: CheckCircle
       };
@@ -77,7 +87,8 @@ function getHistoryVisual(type: string) {
     default:
       return {
         label: "İşlem",
-        badgeClass: "border-slate-200 bg-slate-50 text-slate-700",
+        badgeClass:
+          "border-slate-200 bg-slate-50 text-slate-700",
         iconClass: "bg-slate-100 text-slate-600",
         Icon: Activity
       };
@@ -85,11 +96,20 @@ function getHistoryVisual(type: string) {
 }
 
 export default function HistoryPage() {
-  const [histories, setHistories] = useState<HistoryListItemDto[]>([]);
-  const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
+  const [histories, setHistories] = useState<
+    HistoryListItemDto[]
+  >([]);
+
+  const [selectedHistoryId, setSelectedHistoryId] =
+    useState<number | null>(null);
+
   const [searchQuery, setSearchQuery] = useState("");
+
   const [selectedFilter, setSelectedFilter] =
     useState<HistoryFilter>("all");
+
+  const [isMobileDetailOpen, setIsMobileDetailOpen] =
+    useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -113,17 +133,26 @@ export default function HistoryPage() {
       setHistories(items);
 
       setSelectedHistoryId((currentId) => {
-        if (currentId && items.some((item) => item.id === currentId)) {
+        if (
+          currentId &&
+          items.some((item) => item.id === currentId)
+        ) {
           return currentId;
         }
 
         return items[0]?.id ?? null;
       });
+
+      if (items.length === 0) {
+        setIsMobileDetailOpen(false);
+      }
     } catch (error) {
       console.error("İşlem geçmişi yüklenemedi:", error);
 
       setHistories([]);
       setSelectedHistoryId(null);
+      setIsMobileDetailOpen(false);
+
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -139,7 +168,9 @@ export default function HistoryPage() {
   }, []);
 
   const filteredHistories = useMemo(() => {
-    const normalizedQuery = normalizeTurkish(searchQuery.trim());
+    const normalizedQuery = normalizeTurkish(
+      searchQuery.trim()
+    );
 
     return histories.filter((history) => {
       if (
@@ -165,30 +196,56 @@ export default function HistoryPage() {
         .filter(Boolean)
         .join(" ");
 
-      return normalizeTurkish(searchableText).includes(normalizedQuery);
+      return normalizeTurkish(searchableText).includes(
+        normalizedQuery
+      );
     });
   }, [histories, searchQuery, selectedFilter]);
 
   useEffect(() => {
     if (
       selectedHistoryId &&
-      filteredHistories.some((item) => item.id === selectedHistoryId)
+      filteredHistories.some(
+        (item) => item.id === selectedHistoryId
+      )
     ) {
       return;
     }
 
-    setSelectedHistoryId(filteredHistories[0]?.id ?? null);
+    const nextHistoryId =
+      filteredHistories[0]?.id ?? null;
+
+    setSelectedHistoryId(nextHistoryId);
+
+    if (!nextHistoryId) {
+      setIsMobileDetailOpen(false);
+    }
   }, [filteredHistories, selectedHistoryId]);
 
   const selectedHistory = histories.find(
     (history) => history.id === selectedHistoryId
   );
 
+  const handleSelectHistory = (historyId: number) => {
+    setSelectedHistoryId(historyId);
+    setIsMobileDetailOpen(true);
+  };
+
+  const handleFilterChange = (filter: HistoryFilter) => {
+    setSelectedFilter(filter);
+    setIsMobileDetailOpen(false);
+  };
+
   return (
-    <div className="grid grid-cols-1 gap-6 pb-12 text-slate-950 animate-slide-in lg:grid-cols-12">
-      <section className="flex min-h-[620px] flex-col overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm lg:col-span-4 lg:h-[calc(100dvh-10rem)]">
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/60 p-5">
-          <div>
+    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden text-slate-950 animate-slide-in lg:grid-cols-12 lg:gap-6">
+      {/* İşlem listesi */}
+      <section
+        className={`h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm lg:col-span-4 lg:flex lg:rounded-3xl ${
+          isMobileDetailOpen ? "hidden" : "flex"
+        }`}
+      >
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/60 p-4 sm:p-5">
+          <div className="min-w-0">
             <h2 className="text-sm font-black text-slate-900">
               İşlem Geçmişi
             </h2>
@@ -202,15 +259,19 @@ export default function HistoryPage() {
             type="button"
             onClick={loadHistories}
             disabled={isLoading}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
             title="Geçmişi yenile"
+            aria-label="İşlem geçmişini yenile"
           >
             <RefreshCw
-              className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+              className={`h-4 w-4 ${
+                isLoading ? "animate-spin" : ""
+              }`}
             />
           </button>
         </header>
 
+        {/* Arama ve filtre alanı */}
         <div className="shrink-0 space-y-3 border-b border-slate-100 p-4">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -218,7 +279,9 @@ export default function HistoryPage() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) =>
+                setSearchQuery(event.target.value)
+              }
               placeholder="Müşteri, plaka, kod veya kullanıcı ara..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-xs font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
             />
@@ -229,23 +292,29 @@ export default function HistoryPage() {
               <button
                 key={filter.id}
                 type="button"
-                onClick={() => setSelectedFilter(filter.id)}
-                className={`rounded-lg px-2 py-2 text-[10px] font-black transition ${
+                onClick={() =>
+                  handleFilterChange(filter.id)
+                }
+                className={`min-w-0 rounded-lg px-1.5 py-2 text-[10px] font-black transition sm:px-2 ${
                   selectedFilter === filter.id
                     ? "bg-white text-slate-900 shadow-sm"
                     : "text-slate-500 hover:text-slate-800"
                 }`}
               >
-                {filter.label}
+                <span className="block truncate">
+                  {filter.label}
+                </span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Yalnızca işlem listesi kayar */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
           {isLoading ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
               <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
               <p className="text-xs font-bold text-slate-500">
                 İşlem geçmişi yükleniyor
               </p>
@@ -253,16 +322,27 @@ export default function HistoryPage() {
           ) : errorMessage ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
               <Activity className="h-8 w-8 text-rose-300" />
+
               <p className="text-xs font-black text-rose-700">
                 Geçmiş yüklenemedi
               </p>
+
               <p className="text-[11px] font-medium leading-relaxed text-rose-500">
                 {errorMessage}
               </p>
+
+              <button
+                type="button"
+                onClick={loadHistories}
+                className="mt-1 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+              >
+                Tekrar Dene
+              </button>
             </div>
           ) : filteredHistories.length === 0 ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
               <Activity className="h-7 w-7 text-slate-300" />
+
               <p className="text-xs font-bold text-slate-500">
                 İşlem kaydı bulunamadı
               </p>
@@ -273,7 +353,9 @@ export default function HistoryPage() {
                 const visual = getHistoryVisual(
                   history.typeConstantValue
                 );
+
                 const Icon = visual.Icon;
+
                 const isSelected =
                   selectedHistoryId === history.id;
 
@@ -281,8 +363,10 @@ export default function HistoryPage() {
                   <button
                     key={history.id}
                     type="button"
-                    onClick={() => setSelectedHistoryId(history.id)}
-                    className={`relative flex w-full items-start gap-3 px-5 py-4 text-left transition ${
+                    onClick={() =>
+                      handleSelectHistory(history.id)
+                    }
+                    className={`relative flex w-full items-start gap-3 px-4 py-4 text-left transition sm:px-5 ${
                       isSelected
                         ? "bg-blue-50/80"
                         : "hover:bg-slate-50"
@@ -299,9 +383,10 @@ export default function HistoryPage() {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="truncate text-xs font-black text-slate-900">
-                          {history.clientName || "Bilinmeyen Cari"}
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="min-w-0 flex-1 truncate text-xs font-black text-slate-900">
+                          {history.clientName ||
+                            "Bilinmeyen Cari"}
                         </h3>
 
                         <span
@@ -311,12 +396,15 @@ export default function HistoryPage() {
                         </span>
                       </div>
 
-                      <p className="mt-1 font-mono text-[11px] font-black uppercase tracking-wider text-blue-700">
+                      <p className="mt-1 truncate font-mono text-[11px] font-black uppercase tracking-wider text-blue-700">
                         {history.licensePlate || "-"}
                       </p>
 
                       <p className="mt-1 truncate text-[10px] font-medium text-slate-400">
-                        {history.code} • {formatHistoryDate(history.createdDate)}
+                        {history.code || "-"} •{" "}
+                        {formatHistoryDate(
+                          history.createdDate
+                        )}
                       </p>
                     </div>
                   </button>
@@ -327,22 +415,50 @@ export default function HistoryPage() {
         </div>
       </section>
 
-      <section className="lg:col-span-8">
-        {selectedHistory ? (
-          <HistoryDetail history={selectedHistory} />
-        ) : (
-          <div className="flex min-h-[620px] flex-col items-center justify-center rounded-3xl border border-slate-200/80 bg-white p-12 text-center shadow-sm">
-            <Activity className="h-9 w-9 text-slate-300" />
+      {/* İşlem detay alanı */}
+      <section
+        className={`h-full min-h-0 flex-col overflow-hidden lg:col-span-8 lg:flex ${
+          isMobileDetailOpen ? "flex" : "hidden"
+        }`}
+      >
+        {/* Mobil geri dönüş barı */}
+        <div className="mb-3 flex shrink-0 items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm lg:hidden">
+          <button
+            type="button"
+            onClick={() =>
+              setIsMobileDetailOpen(false)
+            }
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 active:scale-[0.98]"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            İşlemlere Dön
+          </button>
 
-            <h2 className="mt-3 text-sm font-black text-slate-700">
-              İşlem seçilmedi
-            </h2>
+          <span className="max-w-[145px] truncate pr-2 font-mono text-[10px] font-bold uppercase text-blue-700">
+            {selectedHistory?.licensePlate ||
+              "İşlem detayı"}
+          </span>
+        </div>
 
-            <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-400">
-              Detayları görüntülemek için soldaki listeden bir işlem seçin.
-            </p>
-          </div>
-        )}
+        {/* Yalnızca detay içeriği kayar */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 pr-0.5 [-webkit-overflow-scrolling:touch]">
+          {selectedHistory ? (
+            <HistoryDetail history={selectedHistory} />
+          ) : (
+            <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-8 text-center shadow-sm sm:rounded-3xl sm:p-12">
+              <Activity className="h-9 w-9 text-slate-300" />
+
+              <h2 className="mt-3 text-sm font-black text-slate-700">
+                İşlem seçilmedi
+              </h2>
+
+              <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-400">
+                Detayları görüntülemek için işlem
+                listesinden bir kayıt seçin.
+              </p>
+            </div>
+          )}
+        </div>
       </section>
     </div>
   );
@@ -353,46 +469,52 @@ function HistoryDetail({
 }: {
   history: HistoryListItemDto;
 }) {
-  const visual = getHistoryVisual(history.typeConstantValue);
+  const visual = getHistoryVisual(
+    history.typeConstantValue
+  );
+
   const Icon = visual.Icon;
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+    <div className="space-y-4 sm:space-y-6">
+      {/* İşlem özeti */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4">
             <div
-              className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${visual.iconClass}`}
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl sm:h-14 sm:w-14 ${visual.iconClass}`}
             >
-              <Icon className="h-7 w-7" />
+              <Icon className="h-6 w-6 sm:h-7 sm:w-7" />
             </div>
 
-            <div>
+            <div className="min-w-0">
               <span
                 className={`inline-flex rounded-lg border px-2.5 py-1 text-[10px] font-black ${visual.badgeClass}`}
               >
                 {visual.label}
               </span>
 
-              <h2 className="mt-2 text-lg font-black text-slate-950">
-                {history.clientName || "Bilinmeyen Cari"}
+              <h2 className="mt-2 truncate text-base font-black text-slate-950 sm:text-lg">
+                {history.clientName ||
+                  "Bilinmeyen Cari"}
               </h2>
             </div>
           </div>
 
-          <div className="text-left sm:text-right">
+          <div className="rounded-xl bg-slate-50 p-3 text-left sm:bg-transparent sm:p-0 sm:text-right">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               İşlem Tarihi
             </p>
 
-            <p className="mt-1 font-mono text-sm font-black text-slate-800">
+            <p className="mt-1 font-mono text-xs font-black text-slate-800 sm:text-sm">
               {formatHistoryDate(history.createdDate)}
             </p>
           </div>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {/* Temel bilgiler */}
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         <DetailCard
           icon={<User className="h-5 w-5" />}
           label="Müşteri"
@@ -416,20 +538,35 @@ function HistoryDetail({
         <DetailCard
           icon={<MapPin className="h-5 w-5" />}
           label="Depo Konumu"
-          value={history.storageLocation || "Girilmedi"}
+          value={
+            history.storageLocation || "Girilmedi"
+          }
           mono
         />
       </section>
 
-      <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+      {/* Lastik bilgileri */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
         <h3 className="text-sm font-black text-slate-900">
           Lastik Bilgileri
         </h3>
 
-        <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <InfoItem label="Marka" value={history.model || "-"} />
-          <InfoItem label="Mevsim" value={history.brand || "-"} />
-          <InfoItem label="Ebat" value={history.sizes || "-"} />
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:grid-cols-4 sm:gap-4">
+          <InfoItem
+            label="Marka"
+            value={history.model || "-"}
+          />
+
+          <InfoItem
+            label="Mevsim"
+            value={history.brand || "-"}
+          />
+
+          <InfoItem
+            label="Ebat"
+            value={history.sizes || "-"}
+          />
+
           <InfoItem
             label="Adet"
             value={`${history.count || 0} adet`}
@@ -437,40 +574,44 @@ function HistoryDetail({
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
+      {/* İşlem bilgileri */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
         <h3 className="text-sm font-black text-slate-900">
           İşlem Bilgileri
         </h3>
 
-        <div className="mt-5 space-y-3">
-          <div className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50 p-4">
+        <div className="mt-4 space-y-3 sm:mt-5">
+          <div className="flex flex-col gap-1 rounded-2xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <span className="text-xs font-bold text-slate-500">
               İşlemi Yapan
             </span>
 
-            <span className="text-xs font-black text-slate-900">
+            <span className="break-words text-xs font-black text-slate-900 sm:text-right">
               {history.createdUsername || "-"}
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50 p-4">
+          <div className="flex flex-col gap-1 rounded-2xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <span className="text-xs font-bold text-slate-500">
               İşlem Türü
             </span>
 
-            <span className="text-xs font-black text-slate-900">
-              {history.typeConstantName || visual.label}
+            <span className="text-xs font-black text-slate-900 sm:text-right">
+              {history.typeConstantName ||
+                visual.label}
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50 p-4">
+          <div className="flex flex-col gap-1 rounded-2xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <span className="flex items-center gap-2 text-xs font-bold text-slate-500">
-              <Calendar className="h-4 w-4 text-slate-400" />
+              <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
               Tarih
             </span>
 
-            <span className="font-mono text-xs font-black text-slate-900">
-              {formatHistoryDate(history.createdDate)}
+            <span className="font-mono text-xs font-black text-slate-900 sm:text-right">
+              {formatHistoryDate(
+                history.createdDate
+              )}
             </span>
           </div>
         </div>
@@ -491,7 +632,7 @@ function DetailCard({
   mono?: boolean;
 }) {
   return (
-    <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm">
+    <div className="min-w-0 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
         {icon}
       </div>
@@ -502,8 +643,11 @@ function DetailCard({
 
       <p
         className={`mt-1 truncate text-sm font-black text-slate-900 ${
-          mono ? "font-mono uppercase tracking-wider" : ""
+          mono
+            ? "font-mono uppercase tracking-wider"
+            : ""
         }`}
+        title={value}
       >
         {value}
       </p>
@@ -519,12 +663,15 @@ function InfoItem({
   value: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+    <div className="min-w-0 rounded-2xl border border-slate-100 bg-slate-50 p-3 sm:p-4">
+      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 sm:text-[10px]">
         {label}
       </p>
 
-      <p className="mt-1 text-sm font-black text-slate-900">
+      <p
+        className="mt-1 truncate text-xs font-black text-slate-900 sm:text-sm"
+        title={value}
+      >
         {value}
       </p>
     </div>

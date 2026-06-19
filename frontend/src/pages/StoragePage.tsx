@@ -1,19 +1,34 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode
+} from "react";
+
+import {
+  ArrowLeft,
   Calendar,
   Car,
   Image as ImageIcon,
   Layers,
   MapPin,
   Package,
-  Phone,
   Printer,
   Search,
   User
 } from "lucide-react";
 
-import { Customer, TireRecord, TireType, Vehicle } from "../types";
-import { formatDate, normalizeTurkish } from "../utils/helpers";
+import {
+  Customer,
+  TireRecord,
+  TireType,
+  Vehicle
+} from "../types";
+
+import {
+  formatDate,
+  normalizeTurkish
+} from "../utils/helpers";
 
 interface StoragePageProps {
   records: TireRecord[];
@@ -36,9 +51,12 @@ function getRecordCustomer(
   customers: Customer[]
 ): Customer {
   return (
-    customers.find((customer) => customer.id === record.clientId) || {
+    customers.find(
+      (customer) => customer.id === record.clientId
+    ) || {
       id: record.clientId,
-      fullName: record.snapshot?.customerName || "Bilinmeyen Cari",
+      fullName:
+        record.snapshot?.customerName || "Bilinmeyen Cari",
       phone: record.snapshot?.phone || "",
       createdAt: record.createdAt,
       isActive: true
@@ -51,11 +69,16 @@ function getRecordVehicle(
   vehicles: Vehicle[]
 ): Vehicle {
   return (
-    vehicles.find((vehicle) => vehicle.id === record.vehicleId) || {
+    vehicles.find(
+      (vehicle) => vehicle.id === record.vehicleId
+    ) || {
       id: record.vehicleId,
       clientId: record.clientId,
       plate: record.snapshot?.plate || "-",
-      note: record.vehicleNote || record.snapshot?.vehicleNote || "",
+      note:
+        record.vehicleNote ||
+        record.snapshot?.vehicleNote ||
+        "",
       createdAt: record.createdAt
     }
   );
@@ -86,12 +109,20 @@ function matchesSearch(
     .filter(Boolean)
     .join(" ");
 
-  return normalizeTurkish(searchableText).includes(normalizedQuery);
+  return normalizeTurkish(searchableText).includes(
+    normalizedQuery
+  );
 }
 
-function compareStorageLocations(first: TireRecord, second: TireRecord) {
-  const firstLocation = first.storageLocation?.trim() || "";
-  const secondLocation = second.storageLocation?.trim() || "";
+function compareStorageLocations(
+  first: TireRecord,
+  second: TireRecord
+) {
+  const firstLocation =
+    first.storageLocation?.trim() || "";
+
+  const secondLocation =
+    second.storageLocation?.trim() || "";
 
   if (!firstLocation && !secondLocation) {
     return (
@@ -103,10 +134,35 @@ function compareStorageLocations(first: TireRecord, second: TireRecord) {
   if (!firstLocation) return 1;
   if (!secondLocation) return -1;
 
-  return firstLocation.localeCompare(secondLocation, "tr", {
-    numeric: true,
-    sensitivity: "base"
-  });
+  return firstLocation.localeCompare(
+    secondLocation,
+    "tr",
+    {
+      numeric: true,
+      sensitivity: "base"
+    }
+  );
+}
+
+function getTireTypeClasses(tireType: TireType) {
+  if (tireType === "Yazlık") {
+    return {
+      dot: "bg-amber-400",
+      badge: "bg-amber-500"
+    };
+  }
+
+  if (tireType === "Kışlık") {
+    return {
+      dot: "bg-sky-400",
+      badge: "bg-sky-500"
+    };
+  }
+
+  return {
+    dot: "bg-emerald-400",
+    badge: "bg-emerald-500"
+  };
 }
 
 export default function StoragePage({
@@ -117,25 +173,45 @@ export default function StoragePage({
   onOpenDetail,
   onOpenLabelPrinter
 }: StoragePageProps) {
-  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
+  const [searchQuery, setSearchQuery] =
+    useState(initialSearchQuery);
+
   const [selectedType, setSelectedType] =
     useState<(typeof TYPE_FILTERS)[number]>("Tümü");
-  const [selectedRecordId, setSelectedRecordId] = useState("");
+
+  const [selectedRecordId, setSelectedRecordId] =
+    useState("");
+
+  const [isMobileDetailOpen, setIsMobileDetailOpen] =
+    useState(false);
 
   const activeRecords = useMemo(
-    () => records.filter((record) => record.status !== "delivered"),
+    () =>
+      records.filter(
+        (record) => record.status !== "delivered"
+      ),
     [records]
   );
 
   const filteredRecords = useMemo(() => {
     return activeRecords
       .filter((record) => {
-        if (selectedType !== "Tümü" && record.tireType !== selectedType) {
+        if (
+          selectedType !== "Tümü" &&
+          record.tireType !== selectedType
+        ) {
           return false;
         }
 
-        const customer = getRecordCustomer(record, customers);
-        const vehicle = getRecordVehicle(record, vehicles);
+        const customer = getRecordCustomer(
+          record,
+          customers
+        );
+
+        const vehicle = getRecordVehicle(
+          record,
+          vehicles
+        );
 
         return matchesSearch(
           record,
@@ -155,15 +231,26 @@ export default function StoragePage({
 
   useEffect(() => {
     setSearchQuery(initialSearchQuery);
+    setIsMobileDetailOpen(false);
   }, [initialSearchQuery]);
 
   useEffect(() => {
-    const selectedRecordStillVisible = filteredRecords.some(
-      (record) => record.id === selectedRecordId
-    );
+    const selectedRecordStillVisible =
+      filteredRecords.some(
+        (record) => record.id === selectedRecordId
+      );
 
-    if (!selectedRecordStillVisible) {
-      setSelectedRecordId(filteredRecords[0]?.id || "");
+    if (selectedRecordStillVisible) {
+      return;
+    }
+
+    const nextRecordId =
+      filteredRecords[0]?.id || "";
+
+    setSelectedRecordId(nextRecordId);
+
+    if (!nextRecordId) {
+      setIsMobileDetailOpen(false);
     }
   }, [filteredRecords, selectedRecordId]);
 
@@ -180,22 +267,42 @@ export default function StoragePage({
     : undefined;
 
   const recordsWithLocation = activeRecords.filter(
-    (record) => Boolean(record.storageLocation?.trim())
+    (record) =>
+      Boolean(record.storageLocation?.trim())
   ).length;
 
   const totalTireQuantity = activeRecords.reduce(
-    (total, record) => total + Number(record.quantity || 0),
+    (total, record) =>
+      total + Number(record.quantity || 0),
     0
   );
 
+  const handleSelectRecord = (recordId: string) => {
+    setSelectedRecordId(recordId);
+    setIsMobileDetailOpen(true);
+  };
+
+  const handleTypeChange = (
+    type: (typeof TYPE_FILTERS)[number]
+  ) => {
+    setSelectedType(type);
+    setIsMobileDetailOpen(false);
+  };
+
   return (
-    <div className="grid grid-cols-1 gap-6 pb-12 text-slate-950 animate-slide-in lg:grid-cols-12">
-      <section className="flex min-h-[620px] flex-col overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm lg:col-span-4 lg:h-[calc(100dvh-10rem)]">
-        <header className="shrink-0 border-b border-slate-100 bg-slate-50/60 p-5">
+    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden text-slate-950 animate-slide-in lg:grid-cols-12 lg:gap-6">
+      {/* Depo listesi */}
+      <section
+        className={`h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm lg:col-span-4 lg:flex lg:rounded-3xl ${
+          isMobileDetailOpen ? "hidden" : "flex"
+        }`}
+      >
+        {/* Sabit özet alanı */}
+        <header className="shrink-0 border-b border-slate-100 bg-slate-50/60 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <h2 className="flex items-center gap-2 text-sm font-black text-slate-900">
-                <Layers className="h-4 w-4 text-blue-600" />
+                <Layers className="h-4 w-4 shrink-0 text-blue-600" />
                 Depo
               </h2>
 
@@ -204,7 +311,7 @@ export default function StoragePage({
               </p>
             </div>
 
-            <div className="text-right">
+            <div className="shrink-0 text-right">
               <span className="block text-xl font-black text-blue-700">
                 {totalTireQuantity}
               </span>
@@ -238,6 +345,7 @@ export default function StoragePage({
           </div>
         </header>
 
+        {/* Sabit arama ve filtre alanı */}
         <div className="shrink-0 space-y-3 border-b border-slate-100 p-4">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -245,7 +353,9 @@ export default function StoragePage({
             <input
               type="text"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) =>
+                setSearchQuery(event.target.value)
+              }
               placeholder="Raf, plaka, müşteri veya LastikCode ara..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-xs font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
             />
@@ -256,20 +366,25 @@ export default function StoragePage({
               <button
                 key={type}
                 type="button"
-                onClick={() => setSelectedType(type)}
-                className={`rounded-lg px-2 py-2 text-[10px] font-black transition ${
+                onClick={() =>
+                  handleTypeChange(type)
+                }
+                className={`min-w-0 rounded-lg px-1 py-2 text-[10px] font-black transition sm:px-2 ${
                   selectedType === type
                     ? "bg-white text-slate-900 shadow-sm"
                     : "text-slate-500 hover:text-slate-800"
                 }`}
               >
-                {type}
+                <span className="block truncate">
+                  {type}
+                </span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Yalnızca depo listesi kayar */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
           {filteredRecords.length === 0 ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
               <MapPin className="h-7 w-7 text-slate-300" />
@@ -279,22 +394,37 @@ export default function StoragePage({
               </p>
 
               <p className="max-w-xs text-[10px] leading-relaxed text-slate-400">
-                Arama veya filtre kriterlerini değiştirerek tekrar deneyin.
+                Arama veya filtre kriterlerini değiştirerek
+                tekrar deneyin.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
               {filteredRecords.map((record) => {
-                const customer = getRecordCustomer(record, customers);
-                const vehicle = getRecordVehicle(record, vehicles);
-                const isSelected = selectedRecordId === record.id;
+                const customer = getRecordCustomer(
+                  record,
+                  customers
+                );
+
+                const vehicle = getRecordVehicle(
+                  record,
+                  vehicles
+                );
+
+                const isSelected =
+                  selectedRecordId === record.id;
+
+                const tireTypeClasses =
+                  getTireTypeClasses(record.tireType);
 
                 return (
                   <button
                     key={record.id}
                     type="button"
-                    onClick={() => setSelectedRecordId(record.id)}
-                    className={`relative flex w-full items-start justify-between gap-4 px-5 py-4 text-left transition ${
+                    onClick={() =>
+                      handleSelectRecord(record.id)
+                    }
+                    className={`relative flex w-full items-start justify-between gap-4 px-4 py-4 text-left transition sm:px-5 ${
                       isSelected
                         ? "bg-blue-50/80"
                         : "hover:bg-slate-50"
@@ -307,7 +437,8 @@ export default function StoragePage({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 font-mono text-[10px] font-black uppercase text-amber-700">
-                          {record.storageLocation || "Rafsız"}
+                          {record.storageLocation ||
+                            "Rafsız"}
                         </span>
 
                         <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-[10px] font-black uppercase text-blue-700">
@@ -320,7 +451,8 @@ export default function StoragePage({
                       </h3>
 
                       <p className="mt-1 truncate text-[10px] font-medium text-slate-400">
-                        {record.brand} • {record.size} • {record.quantity} adet
+                        {record.brand} • {record.size} •{" "}
+                        {record.quantity} adet
                       </p>
 
                       <p className="mt-1 truncate font-mono text-[9px] font-bold text-slate-400">
@@ -329,13 +461,7 @@ export default function StoragePage({
                     </div>
 
                     <span
-                      className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
-                        record.tireType === "Yazlık"
-                          ? "bg-amber-400"
-                          : record.tireType === "Kışlık"
-                            ? "bg-sky-400"
-                            : "bg-emerald-400"
-                      }`}
+                      className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${tireTypeClasses.dot}`}
                       title={record.tireType}
                     />
                   </button>
@@ -346,188 +472,250 @@ export default function StoragePage({
         </div>
       </section>
 
-      <section className="lg:col-span-8">
-        {selectedRecord && selectedCustomer && selectedVehicle ? (
-          <div className="space-y-6">
-            <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-md">
-                    <Package className="h-7 w-7" />
-                  </div>
+      {/* Depo detay alanı */}
+      <section
+        className={`h-full min-h-0 flex-col overflow-hidden lg:col-span-8 lg:flex ${
+          isMobileDetailOpen ? "flex" : "hidden"
+        }`}
+      >
+        {/* Mobil geri dönüş barı */}
+        <div className="mb-3 flex shrink-0 items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm lg:hidden">
+          <button
+            type="button"
+            onClick={() =>
+              setIsMobileDetailOpen(false)
+            }
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 active:scale-[0.98]"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Depoya Dön
+          </button>
 
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-lg bg-slate-900 px-2.5 py-1 font-mono text-[10px] font-black text-white">
-                        {selectedRecord.tireCode}
-                      </span>
+          <span className="max-w-[145px] truncate pr-2 font-mono text-[10px] font-bold uppercase text-amber-700">
+            {selectedRecord?.storageLocation ||
+              "Depo detayı"}
+          </span>
+        </div>
 
-                      <span
-                        className={`rounded-lg px-2.5 py-1 text-[10px] font-black text-white ${
-                          selectedRecord.tireType === "Yazlık"
-                            ? "bg-amber-500"
-                            : selectedRecord.tireType === "Kışlık"
-                              ? "bg-sky-500"
-                              : "bg-emerald-500"
-                        }`}
-                      >
-                        {selectedRecord.tireType}
-                      </span>
+        {/* Yalnızca detay alanı kayar */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 pr-0.5 [-webkit-overflow-scrolling:touch]">
+          {selectedRecord &&
+          selectedCustomer &&
+          selectedVehicle ? (
+            <div className="space-y-4 sm:space-y-6">
+              {/* Kayıt özeti */}
+              <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-md sm:h-14 sm:w-14">
+                      <Package className="h-6 w-6 sm:h-7 sm:w-7" />
                     </div>
 
-                    <h2 className="mt-2 text-lg font-black text-slate-950">
-                      {selectedRecord.brand} • {selectedRecord.size}
-                    </h2>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="max-w-full truncate rounded-lg bg-slate-900 px-2.5 py-1 font-mono text-[10px] font-black text-white">
+                          {selectedRecord.tireCode}
+                        </span>
 
-                    <p className="mt-1 text-xs font-medium text-slate-500">
-                      {selectedRecord.quantity} adet lastik
+                        <span
+                          className={`rounded-lg px-2.5 py-1 text-[10px] font-black text-white ${
+                            getTireTypeClasses(
+                              selectedRecord.tireType
+                            ).badge
+                          }`}
+                        >
+                          {selectedRecord.tireType}
+                        </span>
+                      </div>
+
+                      <h2 className="mt-2 truncate text-base font-black text-slate-950 sm:text-lg">
+                        {selectedRecord.brand} •{" "}
+                        {selectedRecord.size}
+                      </h2>
+
+                      <p className="mt-1 text-xs font-medium text-slate-500">
+                        {selectedRecord.quantity} adet lastik
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3 text-center sm:min-w-40 sm:p-4">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-amber-600">
+                      Depo Konumu
+                    </p>
+
+                    <p className="mt-1 truncate font-mono text-lg font-black uppercase text-amber-800 sm:text-xl">
+                      {selectedRecord.storageLocation ||
+                        "Rafsız"}
                     </p>
                   </div>
                 </div>
+              </section>
 
-                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-center sm:min-w-40">
-                  <p className="text-[10px] font-black uppercase tracking-wide text-amber-600">
-                    Depo Konumu
-                  </p>
-
-                  <p className="mt-1 font-mono text-xl font-black uppercase text-amber-800">
-                    {selectedRecord.storageLocation || "Rafsız"}
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <InfoCard
-                icon={<User className="h-5 w-5" />}
-                label="Müşteri"
-                value={selectedCustomer.fullName}
-                secondary={selectedCustomer.phone || "Telefon belirtilmedi"}
-              />
-
-              <InfoCard
-                icon={<Car className="h-5 w-5" />}
-                label="Araç"
-                value={selectedVehicle.plate || "-"}
-                secondary={selectedVehicle.note || "Araç notu bulunmuyor"}
-                mono
-              />
-            </section>
-
-            <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
-              <div className="mb-4">
-                <h3 className="text-sm font-black text-slate-900">
-                  Lastik Bilgileri
-                </h3>
-
-                <p className="mt-1 text-[11px] font-medium text-slate-400">
-                  Seçilen depo kaydının teknik bilgileri
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <DetailItem label="Marka" value={selectedRecord.brand} />
-                <DetailItem label="Ebat" value={selectedRecord.size} />
-                <DetailItem
-                  label="Mevsim"
-                  value={selectedRecord.tireType}
+              {/* Müşteri ve araç */}
+              <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+                <InfoCard
+                  icon={<User className="h-5 w-5" />}
+                  label="Müşteri"
+                  value={selectedCustomer.fullName}
+                  secondary={
+                    selectedCustomer.phone ||
+                    "Telefon belirtilmedi"
+                  }
                 />
-                <DetailItem
-                  label="Adet"
-                  value={`${selectedRecord.quantity} adet`}
+
+                <InfoCard
+                  icon={<Car className="h-5 w-5" />}
+                  label="Araç"
+                  value={selectedVehicle.plate || "-"}
+                  secondary={
+                    selectedVehicle.note ||
+                    "Araç notu bulunmuyor"
+                  }
+                  mono
                 />
-              </div>
+              </section>
 
-              <div className="mt-4 flex items-center gap-2 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold text-slate-500">
-                <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
-                Kayıt tarihi: {formatDate(selectedRecord.createdAt)}
-              </div>
-            </section>
+              {/* Lastik bilgileri */}
+              <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+                <div className="mb-4">
+                  <h3 className="text-sm font-black text-slate-900">
+                    Lastik Bilgileri
+                  </h3>
 
-            <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
-              <div className="mb-4">
-                <h3 className="text-sm font-black text-slate-900">
-                  Araç / Kayıt Notu
-                </h3>
-              </div>
-
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600">
-                {selectedRecord.vehicleNote ||
-                  selectedVehicle.note ||
-                  "Not girilmemiş."}
-              </div>
-            </section>
-
-            <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
-              <div className="mb-4">
-                <h3 className="text-sm font-black text-slate-900">
-                  Görseller
-                </h3>
-
-                <p className="mt-1 text-[11px] font-medium text-slate-400">
-                  Araç ve emanet kaydına bağlı fotoğraflar
-                </p>
-              </div>
-
-              {selectedRecord.photos?.length ? (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                  {selectedRecord.photos.map((photo) => (
-                    <div
-                      key={String(photo.fileId || photo.id)}
-                      className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"
-                    >
-                      <img
-                        src={photo.dataUrl}
-                        alt={photo.name}
-                        referrerPolicy="no-referrer"
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-                  <ImageIcon className="mx-auto h-7 w-7 text-slate-300" />
-
-                  <p className="mt-2 text-xs font-bold text-slate-500">
-                    Görsel bulunmuyor
+                  <p className="mt-1 text-[11px] font-medium text-slate-400">
+                    Seçilen depo kaydının teknik bilgileri
                   </p>
                 </div>
-              )}
-            </section>
 
-            <section className="flex flex-col gap-3 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-end">
-              <button
-                type="button"
-                onClick={() => onOpenLabelPrinter(selectedRecord)}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-5 text-xs font-black text-blue-700 transition hover:bg-blue-100"
-              >
-                <Printer className="h-4 w-4" />
-                Barkod / Etiket
-              </button>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <DetailItem
+                    label="Marka"
+                    value={selectedRecord.brand}
+                  />
 
-              <button
-                type="button"
-                onClick={() => onOpenDetail(selectedRecord)}
-                className="inline-flex h-11 items-center justify-center rounded-2xl bg-slate-950 px-6 text-xs font-black text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800"
-              >
-                İncele / Düzenle / Teslim Et
-              </button>
-            </section>
-          </div>
-        ) : (
-          <div className="flex min-h-[620px] flex-col items-center justify-center rounded-3xl border border-slate-200/80 bg-white p-12 text-center shadow-sm">
-            <MapPin className="h-9 w-9 text-slate-300" />
+                  <DetailItem
+                    label="Ebat"
+                    value={selectedRecord.size}
+                  />
 
-            <h2 className="mt-3 text-sm font-black text-slate-700">
-              Depo kaydı seçilmedi
-            </h2>
+                  <DetailItem
+                    label="Mevsim"
+                    value={selectedRecord.tireType}
+                  />
 
-            <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-400">
-              Detayları görüntülemek için soldaki listeden bir emanet kaydı seçin.
-            </p>
-          </div>
-        )}
+                  <DetailItem
+                    label="Adet"
+                    value={`${selectedRecord.quantity} adet`}
+                  />
+                </div>
+
+                <div className="mt-4 flex items-start gap-2 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-500 sm:items-center">
+                  <Calendar className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 sm:mt-0" />
+
+                  <span>
+                    Kayıt tarihi:{" "}
+                    {formatDate(selectedRecord.createdAt)}
+                  </span>
+                </div>
+              </section>
+
+              {/* Araç notu */}
+              <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+                <div className="mb-4">
+                  <h3 className="text-sm font-black text-slate-900">
+                    Araç / Kayıt Notu
+                  </h3>
+                </div>
+
+                <div className="break-words rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600">
+                  {selectedRecord.vehicleNote ||
+                    selectedVehicle.note ||
+                    "Not girilmemiş."}
+                </div>
+              </section>
+
+              {/* Görseller */}
+              <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+                <div className="mb-4">
+                  <h3 className="text-sm font-black text-slate-900">
+                    Görseller
+                  </h3>
+
+                  <p className="mt-1 text-[11px] font-medium text-slate-400">
+                    Araç ve emanet kaydına bağlı
+                    fotoğraflar
+                  </p>
+                </div>
+
+                {selectedRecord.photos?.length ? (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {selectedRecord.photos.map((photo) => (
+                      <div
+                        key={String(
+                          photo.fileId || photo.id
+                        )}
+                        className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"
+                      >
+                        <img
+                          src={photo.dataUrl}
+                          alt={photo.name}
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+                    <ImageIcon className="mx-auto h-7 w-7 text-slate-300" />
+
+                    <p className="mt-2 text-xs font-bold text-slate-500">
+                      Görsel bulunmuyor
+                    </p>
+                  </div>
+                )}
+              </section>
+
+              {/* İşlem butonları */}
+              <section className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-end sm:rounded-3xl sm:p-5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenLabelPrinter(selectedRecord)
+                  }
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-5 text-xs font-black text-blue-700 transition hover:bg-blue-100 active:scale-[0.98] sm:w-auto"
+                >
+                  <Printer className="h-4 w-4" />
+                  Barkod / Etiket
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenDetail(selectedRecord)
+                  }
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-slate-950 px-6 text-xs font-black text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800 active:scale-[0.98] sm:w-auto"
+                >
+                  İncele / Düzenle / Teslim Et
+                </button>
+              </section>
+            </div>
+          ) : (
+            <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-8 text-center shadow-sm sm:rounded-3xl sm:p-12">
+              <MapPin className="h-9 w-9 text-slate-300" />
+
+              <h2 className="mt-3 text-sm font-black text-slate-700">
+                Depo kaydı seçilmedi
+              </h2>
+
+              <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-400">
+                Detayları görüntülemek için depo
+                listesinden bir emanet kaydı seçin.
+              </p>
+            </div>
+          )}
+        </div>
       </section>
     </div>
   );
@@ -547,7 +735,7 @@ function InfoCard({
   mono?: boolean;
 }) {
   return (
-    <article className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm">
+    <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
         {icon}
       </div>
@@ -558,13 +746,19 @@ function InfoCard({
 
       <p
         className={`mt-1 truncate text-sm font-black text-slate-900 ${
-          mono ? "font-mono uppercase tracking-wider" : ""
+          mono
+            ? "font-mono uppercase tracking-wider"
+            : ""
         }`}
+        title={value}
       >
         {value}
       </p>
 
-      <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
+      <p
+        className="mt-1 truncate text-[11px] font-medium text-slate-400"
+        title={secondary}
+      >
         {secondary}
       </p>
     </article>
@@ -579,12 +773,15 @@ function DetailItem({
   value: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+    <div className="min-w-0 rounded-2xl border border-slate-100 bg-slate-50 p-3 sm:p-4">
       <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
         {label}
       </p>
 
-      <p className="mt-1 text-sm font-black text-slate-900">
+      <p
+        className="mt-1 truncate text-xs font-black text-slate-900 sm:text-sm"
+        title={value}
+      >
         {value}
       </p>
     </div>

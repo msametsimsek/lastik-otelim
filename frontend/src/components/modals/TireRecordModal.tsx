@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  X,
-  Upload,
-  Trash2,
-  Printer,
   AlertTriangle,
+  Camera,
+  Car,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Printer,
+  Trash2,
+  Upload,
   UserPlus,
-  Car
+  X,
 } from "lucide-react";
 
 import { TirePhoto, TireRecord, TireType } from "../../types";
@@ -17,7 +22,7 @@ import {
   constantApi,
   ClientListItemDto,
   VehicleListItemDto,
-  ConstantListItemDto
+  ConstantListItemDto,
 } from "../../services/tireApi";
 import { fileApi, pickImagePreviewUrl } from "../../services/fileApi";
 import { formatPlate, generateId, normalizeTurkish } from "../../utils/helpers";
@@ -27,9 +32,37 @@ interface TireRecordModalProps {
   onSave: (newRecord: TireRecord, autoPrint: boolean) => void;
   showToast: (
     msg: string,
-    type: "success" | "error" | "info" | "warning"
+    type: "success" | "error" | "info" | "warning",
   ) => void;
 }
+
+interface PendingPhoto {
+  id: string;
+  file: File;
+  previewUrl: string;
+  name: string;
+  type: string;
+}
+
+type WizardStep = 0 | 1 | 2;
+
+const WIZARD_STEPS = [
+  {
+    title: "Müşteri",
+    description: "Müşteri seçimi",
+    icon: UserPlus,
+  },
+  {
+    title: "Araç",
+    description: "Araç seçimi",
+    icon: Car,
+  },
+  {
+    title: "Lastik",
+    description: "Lastik ve fotoğraflar",
+    icon: AlertTriangle,
+  },
+] as const;
 
 function getConstantLabel(item: ConstantListItemDto) {
   return item.name || item.value || "";
@@ -72,7 +105,7 @@ function uniqueTextList(values: string[]) {
 function getConstantIdByName(
   constants: ConstantListItemDto[],
   type: "TIRE_TYPE" | "TIRE_BRAND",
-  name: string
+  name: string,
 ) {
   const normalizedName = normalizeTurkish(name.trim());
 
@@ -85,7 +118,7 @@ function getConstantIdByName(
 function findExactClientMatch(
   clients: ClientListItemDto[],
   fullName: string,
-  phone: string
+  phone: string,
 ) {
   const normalizedName = normalizeTurkish(fullName);
   const normalizedPhone = normalizePhone(phone);
@@ -94,8 +127,12 @@ function findExactClientMatch(
     const clientName = normalizeTurkish(client.name || "");
     const clientPhone = normalizePhone(client.phone || "");
 
-    const nameMatches = normalizedName && clientName === normalizedName;
-    const phoneMatches = normalizedPhone && clientPhone === normalizedPhone;
+    const nameMatches = Boolean(
+      normalizedName && clientName === normalizedName,
+    );
+    const phoneMatches = Boolean(
+      normalizedPhone && clientPhone === normalizedPhone,
+    );
 
     return nameMatches || phoneMatches;
   });
@@ -107,18 +144,20 @@ function findExactVehicleMatch(vehicles: VehicleListItemDto[], plate: string) {
   if (!normalizedPlate) return undefined;
 
   return vehicles.find(
-    (vehicle) => normalizePlate(vehicle.licensePlate || "") === normalizedPlate
+    (vehicle) => normalizePlate(vehicle.licensePlate || "") === normalizedPlate,
   );
 }
 
 export default function TireRecordModal({
   onClose,
   onSave,
-  showToast
+  showToast,
 }: TireRecordModalProps) {
-  const [clientSearchResults, setClientSearchResults] = useState<ClientListItemDto[]>(
-    []
-  );
+  const [currentStep, setCurrentStep] = useState<WizardStep>(0);
+
+  const [clientSearchResults, setClientSearchResults] = useState<
+    ClientListItemDto[]
+  >([]);
   const [vehicleSearchResults, setVehicleSearchResults] = useState<
     VehicleListItemDto[]
   >([]);
@@ -138,28 +177,65 @@ export default function TireRecordModal({
   const [quantity, setQuantity] = useState(4);
   const [location, setLocation] = useState("");
 
-  const [photos, setPhotos] = useState<TirePhoto[]>([]);
+  const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
+  const pendingPhotosRef = useRef<PendingPhoto[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchingClient, setIsSearchingClient] = useState(false);
   const [isSearchingVehicle, setIsSearchingVehicle] = useState(false);
+  const [isAdvancing, setIsAdvancing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({
+    current: 0,
+    total: 0,
+  });
+
+  const isBusy = isSaving || isUploading || isAdvancing;
 
   const selectedClient = useMemo(
     () =>
       clientSearchResults.find(
-        (client) => String(client.id) === selectedClientId
+        (client) => String(client.id) === selectedClientId,
       ),
-    [clientSearchResults, selectedClientId]
+    [clientSearchResults, selectedClientId],
   );
+
+  const exactClientMatch = useMemo(
+    () => findExactClientMatch(clientSearchResults, fullName, phone),
+    [clientSearchResults, fullName, phone],
+  );
+
+  const effectiveClient = selectedClient || exactClientMatch;
+
+  const effectiveClientId =
+    selectedClientId || (effectiveClient ? String(effectiveClient.id) : "");
+
+  const filteredVehicleSearchResults = useMemo(() => {
+    if (!effectiveClientId) return [];
+
+    return vehicleSearchResults.filter(
+      (vehicle) => String(vehicle.clientId || "") === effectiveClientId,
+    );
+  }, [effectiveClientId, vehicleSearchResults]);
 
   const selectedVehicle = useMemo(
     () =>
       vehicleSearchResults.find(
-        (vehicle) => String(vehicle.id) === selectedVehicleId
+        (vehicle) => String(vehicle.id) === selectedVehicleId,
       ),
-    [vehicleSearchResults, selectedVehicleId]
+    [vehicleSearchResults, selectedVehicleId],
   );
+
+  const exactVehicleMatch = useMemo(
+    () => findExactVehicleMatch(filteredVehicleSearchResults, plate),
+    [filteredVehicleSearchResults, plate],
+  );
+
+  const effectiveVehicle = selectedVehicle || exactVehicleMatch;
+
+  const effectiveVehicleId =
+    selectedVehicleId || (effectiveVehicle ? String(effectiveVehicle.id) : "");
 
   const brandOptions = useMemo(() => {
     const apiBrands = constants
@@ -177,9 +253,49 @@ export default function TireRecordModal({
       .map((item) => normalizeTireType(getConstantLabel(item)));
 
     return uniqueTextList(["Yazlık", "Kışlık", "4 Mevsim", ...apiSeasons]).map(
-      normalizeTireType
+      normalizeTireType,
     );
   }, [constants]);
+
+  const hasUnsavedData = useMemo(
+    () =>
+      Boolean(
+        fullName.trim() ||
+        phone.trim() ||
+        plate.trim() ||
+        vehicleNote.trim() ||
+        brand.trim() ||
+        size.trim() ||
+        location.trim() ||
+        pendingPhotos.length > 0 ||
+        quantity !== 4 ||
+        tireType !== "Yazlık",
+      ),
+    [
+      brand,
+      fullName,
+      location,
+      pendingPhotos.length,
+      phone,
+      plate,
+      quantity,
+      size,
+      tireType,
+      vehicleNote,
+    ],
+  );
+
+  useEffect(() => {
+    pendingPhotosRef.current = pendingPhotos;
+  }, [pendingPhotos]);
+
+  useEffect(() => {
+    return () => {
+      pendingPhotosRef.current.forEach((photo) => {
+        URL.revokeObjectURL(photo.previewUrl);
+      });
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -190,7 +306,7 @@ export default function TireRecordModal({
 
         const constantResponse = await constantApi.getConstants({
           page: 0,
-          pageSize: 1000
+          pageSize: 1000,
         });
 
         if (!isMounted) return;
@@ -205,7 +321,7 @@ export default function TireRecordModal({
           error instanceof Error
             ? error.message
             : "Marka ve mevsim bilgileri API üzerinden yüklenemedi.",
-          "error"
+          "error",
         );
       } finally {
         if (isMounted) {
@@ -224,8 +340,8 @@ export default function TireRecordModal({
   useEffect(() => {
     const searchKey = `${fullName} ${phone}`.trim();
 
-    if (selectedClientId || searchKey.length < 2) {
-      if (!selectedClientId) {
+    if (currentStep !== 0 || selectedClientId || searchKey.length < 2) {
+      if (!selectedClientId && searchKey.length < 2) {
         setClientSearchResults([]);
       }
 
@@ -241,7 +357,7 @@ export default function TireRecordModal({
         const response = await clientApi.getClients({
           page: 0,
           pageSize: 10,
-          searchKey
+          searchKey,
         });
 
         if (!isMounted) return;
@@ -266,13 +382,13 @@ export default function TireRecordModal({
       isMounted = false;
       window.clearTimeout(timeoutId);
     };
-  }, [fullName, phone, selectedClientId]);
+  }, [currentStep, fullName, phone, selectedClientId]);
 
   useEffect(() => {
     const searchKey = plate.trim();
 
-    if (selectedVehicleId || searchKey.length < 2) {
-      if (!selectedVehicleId) {
+    if (currentStep !== 1 || selectedVehicleId || searchKey.length < 2) {
+      if (!selectedVehicleId && searchKey.length < 2) {
         setVehicleSearchResults([]);
       }
 
@@ -288,7 +404,7 @@ export default function TireRecordModal({
         const response = await vehicleApi.getVehicles({
           page: 0,
           pageSize: 10,
-          searchKey
+          searchKey,
         });
 
         if (!isMounted) return;
@@ -313,17 +429,26 @@ export default function TireRecordModal({
       isMounted = false;
       window.clearTimeout(timeoutId);
     };
-  }, [plate, selectedVehicleId]);
+  }, [currentStep, plate, selectedVehicleId]);
 
   const handleSelectClient = (client: ClientListItemDto) => {
     setSelectedClientId(String(client.id));
     setFullName(client.name || "");
     setPhone(client.phone || "");
     setClientSearchResults([client]);
+
+    setSelectedVehicleId("");
+    setPlate("");
+    setVehicleNote("");
+    setVehicleSearchResults([]);
   };
 
   const clearSelectedClient = () => {
     setSelectedClientId("");
+    setSelectedVehicleId("");
+    setPlate("");
+    setVehicleNote("");
+    setVehicleSearchResults([]);
   };
 
   const handleSelectVehicle = (vehicle: VehicleListItemDto) => {
@@ -331,77 +456,250 @@ export default function TireRecordModal({
     setPlate(vehicle.licensePlate || "");
     setVehicleNote(vehicle.note || "");
     setVehicleSearchResults([vehicle]);
-
-    if (vehicle.clientId) {
-      setSelectedClientId(String(vehicle.clientId));
-      setFullName(vehicle.clientName || fullName);
-    }
   };
 
   const clearSelectedVehicle = () => {
     setSelectedVehicleId("");
   };
 
-  const handlePhotoUpload = async (files: FileList | null) => {
-    if (!files) return;
+  const handleAddPhotos = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
 
-    setIsUploading(true);
+    const nextPhotos: PendingPhoto[] = [];
+    let rejectedCount = 0;
 
-    const nextPhotos: TirePhoto[] = [...photos];
-    let uploadedCount = 0;
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
+    Array.from(files).forEach((file) => {
       if (!file.type.startsWith("image/")) {
-        showToast("Lütfen sadece görsel dosyası seçin.", "error");
-        continue;
+        rejectedCount += 1;
+        return;
       }
 
-      try {
-        const localPreviewUrl = URL.createObjectURL(file);
-        const uploadedFile = await fileApi.uploadFile(file);
-        const previewUrl = pickImagePreviewUrl(uploadedFile);
+      nextPhotos.push({
+        id: generateId(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        name: file.name,
+        type: file.type,
+      });
+    });
 
-        nextPhotos.push({
-          id: String(uploadedFile.id || generateId()),
-          fileId: uploadedFile.id,
-          name: uploadedFile.orginalName || uploadedFile.originalName || file.name,
-          type: file.type,
-          dataUrl: previewUrl || localPreviewUrl,
-          fileUrl: uploadedFile.fileUrl
-        });
-
-        uploadedCount++;
-      } catch (error) {
-        console.error(error);
-
-        showToast(
-          error instanceof Error
-            ? error.message
-            : "Fotoğraf API'ye yüklenirken hata oluştu.",
-          "error"
-        );
-      }
+    if (nextPhotos.length > 0) {
+      setPendingPhotos((currentPhotos) => [...currentPhotos, ...nextPhotos]);
+      showToast(
+        `${nextPhotos.length} fotoğraf hazırlandı. Kayıt tamamlanana kadar sunucuya gönderilmeyecek.`,
+        "info",
+      );
     }
 
-    setPhotos(nextPhotos);
-    setIsUploading(false);
-
-    if (uploadedCount > 0) {
-      showToast(`${uploadedCount} fotoğraf API'ye yüklendi.`, "success");
+    if (rejectedCount > 0) {
+      showToast("Lütfen sadece görsel dosyası seçin.", "warning");
     }
   };
 
   const handleRemovePhoto = (photoId: string) => {
-    setPhotos((currentPhotos) =>
-      currentPhotos.filter((photo) => photo.id !== photoId)
-    );
+    setPendingPhotos((currentPhotos) => {
+      const photoToRemove = currentPhotos.find((photo) => photo.id === photoId);
 
-    showToast(
-      "Fotoğraf listeden çıkarıldı. Kayıt payload'ına dahil edilmeyecek.",
-      "info"
-    );
+      if (photoToRemove) {
+        URL.revokeObjectURL(photoToRemove.previewUrl);
+      }
+
+      return currentPhotos.filter((photo) => photo.id !== photoId);
+    });
+  };
+
+  const handleRequestClose = () => {
+    if (isBusy) return;
+
+    if (
+      hasUnsavedData &&
+      !window.confirm(
+        "Girdiğiniz bilgiler kaydedilmedi. Lastik ekleme işlemini iptal etmek istediğinize emin misiniz?",
+      )
+    ) {
+      return;
+    }
+
+    onClose();
+  };
+
+  const validateClientStep = async () => {
+    const trimmedFullName = fullName.trim();
+    const trimmedPhone = phone.trim();
+
+    if (selectedClientId) return true;
+
+    if (!trimmedFullName || !trimmedPhone) {
+      showToast("Müşteri adı ve telefon bilgisi zorunludur.", "warning");
+      return false;
+    }
+
+    try {
+      setIsAdvancing(true);
+
+      const response = await clientApi.getClients({
+        page: 0,
+        pageSize: 20,
+        searchKey: `${trimmedFullName} ${trimmedPhone}`.trim(),
+      });
+
+      const results = response.items || [];
+      const exactMatch = findExactClientMatch(
+        results,
+        trimmedFullName,
+        trimmedPhone,
+      );
+
+      setClientSearchResults(results);
+
+      if (exactMatch) {
+        handleSelectClient(exactMatch);
+        showToast("Mevcut müşteri kaydı eşleştirildi.", "info");
+      }
+
+      return true;
+    } catch (error) {
+      console.error(error);
+
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Müşteri bilgisi kontrol edilirken hata oluştu.",
+        "error",
+      );
+
+      return false;
+    } finally {
+      setIsAdvancing(false);
+    }
+  };
+
+  const validateVehicleStep = async () => {
+    const formattedPlate = formatPlate(plate);
+
+    if (selectedVehicleId) return true;
+
+    if (!formattedPlate) {
+      showToast("Araç plakası zorunludur.", "warning");
+      return false;
+    }
+
+    try {
+      setIsAdvancing(true);
+
+      const response = await vehicleApi.getVehicles({
+        page: 0,
+        pageSize: 20,
+        searchKey: formattedPlate,
+      });
+
+      const results = response.items || [];
+      const samePlateVehicle = findExactVehicleMatch(results, formattedPlate);
+
+      setVehicleSearchResults(results);
+
+      if (samePlateVehicle) {
+        const sameVehicleClientId = String(samePlateVehicle.clientId || "");
+
+        if (effectiveClientId && sameVehicleClientId === effectiveClientId) {
+          handleSelectVehicle(samePlateVehicle);
+          showToast("Mevcut araç kaydı eşleştirildi.", "info");
+          return true;
+        }
+
+        showToast(
+          "Bu plaka başka bir müşteriye kayıtlı görünüyor. Önce doğru müşteriyi seçmelisiniz.",
+          "warning",
+        );
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error(error);
+
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Araç bilgisi kontrol edilirken hata oluştu.",
+        "error",
+      );
+
+      return false;
+    } finally {
+      setIsAdvancing(false);
+    }
+  };
+
+  const handleNextStep = async () => {
+    if (currentStep === 0) {
+      const isValid = await validateClientStep();
+
+      if (!isValid) return;
+
+      setCurrentStep(1);
+      return;
+    }
+
+    if (currentStep === 1) {
+      const isValid = await validateVehicleStep();
+
+      if (!isValid) return;
+
+      setCurrentStep(2);
+    }
+  };
+
+  const handlePreviousStep = () => {
+    if (isBusy || currentStep === 0) return;
+
+    setCurrentStep((currentStep - 1) as WizardStep);
+  };
+
+  const uploadPendingPhotos = async (): Promise<TirePhoto[]> => {
+    if (pendingPhotos.length === 0) return [];
+
+    setIsUploading(true);
+    setUploadProgress({ current: 0, total: pendingPhotos.length });
+
+    const uploadedPhotos: TirePhoto[] = [];
+
+    try {
+      for (let index = 0; index < pendingPhotos.length; index += 1) {
+        const pendingPhoto = pendingPhotos[index];
+        const uploadedFile = await fileApi.uploadFile(pendingPhoto.file);
+        const uploadedFileId = Number(uploadedFile.id);
+
+        if (!Number.isFinite(uploadedFileId) || uploadedFileId <= 0) {
+          throw new Error(
+            `"${pendingPhoto.name}" fotoğrafı yüklendi ancak geçerli dosya kimliği alınamadı.`,
+          );
+        }
+
+        const previewUrl = pickImagePreviewUrl(uploadedFile);
+
+        uploadedPhotos.push({
+          id: String(uploadedFileId),
+          fileId: uploadedFileId,
+          name:
+            uploadedFile.orginalName ||
+            uploadedFile.originalName ||
+            pendingPhoto.name,
+          type: pendingPhoto.type,
+          dataUrl: previewUrl || pendingPhoto.previewUrl,
+          fileUrl: uploadedFile.fileUrl,
+        });
+
+        setUploadProgress({
+          current: index + 1,
+          total: pendingPhotos.length,
+        });
+      }
+
+      return uploadedPhotos;
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleSave = async (autoPrint: boolean) => {
@@ -413,57 +711,39 @@ export default function TireRecordModal({
     const trimmedSize = size.trim();
     const trimmedLocation = location.trim();
 
-    const imageIds = photos
-      .map((photo) => photo.fileId)
-      .filter((id): id is number => typeof id === "number" && id > 0);
-
     if (!trimmedBrand || !trimmedSize) {
       showToast("Lastik markası ve ebat bilgisi zorunludur.", "warning");
       return;
     }
 
-    const exactClientMatch =
-      selectedClient ||
-      findExactClientMatch(clientSearchResults, trimmedFullName, trimmedPhone);
-
-    const exactVehicleMatch =
-      selectedVehicle || findExactVehicleMatch(vehicleSearchResults, formattedPlate);
-
-    const effectiveClientId =
-      selectedClientId ||
-      (exactClientMatch ? String(exactClientMatch.id) : "") ||
-      (exactVehicleMatch?.clientId ? String(exactVehicleMatch.clientId) : "");
-
-    const effectiveVehicleId =
-      selectedVehicleId ||
-      (exactVehicleMatch ? String(exactVehicleMatch.id) : "");
-
     if (!effectiveClientId && (!trimmedFullName || !trimmedPhone)) {
       showToast("Müşteri adı ve telefon bilgisi zorunludur.", "warning");
+      setCurrentStep(0);
       return;
     }
 
     if (!effectiveVehicleId && !formattedPlate) {
       showToast("Araç plakası zorunludur.", "warning");
+      setCurrentStep(1);
       return;
     }
 
     const modelConstantId = getConstantIdByName(
       constants,
       "TIRE_TYPE",
-      trimmedBrand
+      trimmedBrand,
     );
 
     const brandConstantId = getConstantIdByName(
       constants,
       "TIRE_BRAND",
-      tireType
+      tireType,
     );
 
     if (modelConstantId === undefined) {
       showToast(
         `"${trimmedBrand}" markası backend sabitlerinde bulunamadı. Lütfen listeden marka seçin.`,
-        "warning"
+        "warning",
       );
       return;
     }
@@ -471,7 +751,7 @@ export default function TireRecordModal({
     if (brandConstantId === undefined) {
       showToast(
         `"${tireType}" mevsim türü backend sabitlerinde bulunamadı.`,
-        "warning"
+        "warning",
       );
       return;
     }
@@ -479,17 +759,22 @@ export default function TireRecordModal({
     try {
       setIsSaving(true);
 
+      const uploadedPhotos = await uploadPendingPhotos();
+      const imageIds = uploadedPhotos
+        .map((photo) => photo.fileId)
+        .filter((id): id is number => typeof id === "number" && id > 0);
+
       const createdTire = await tireApi.addTire({
         client: effectiveClientId
           ? {
               id: Number(effectiveClientId),
               name: null,
-              phone: null
+              phone: null,
             }
           : {
               id: null,
               name: trimmedFullName,
-              phone: trimmedPhone
+              phone: trimmedPhone,
             },
 
         vehicle: effectiveVehicleId
@@ -497,43 +782,43 @@ export default function TireRecordModal({
               id: Number(effectiveVehicleId),
               licensePlate: null,
               note: null,
-              imageIds
+              imageIds,
             }
           : {
               id: null,
               licensePlate: formattedPlate,
               note: trimmedVehicleNote,
-              imageIds
+              imageIds,
             },
 
         modelConstantId,
         brandConstantId,
         sizes: trimmedSize,
         count: Number(quantity),
-        storageLocation: trimmedLocation
+        storageLocation: trimmedLocation,
       });
 
       const finalVehicleId = String(
-        createdTire.vehicleId || effectiveVehicleId || ""
+        createdTire.vehicleId || effectiveVehicleId || "",
       );
 
       const finalCustomerName =
         createdTire.clientName ||
-        exactClientMatch?.name ||
-        exactVehicleMatch?.clientName ||
+        effectiveClient?.name ||
+        effectiveVehicle?.clientName ||
         trimmedFullName ||
         "Bilinmeyen Cari";
 
-      const finalCustomerPhone = exactClientMatch?.phone || trimmedPhone || "";
+      const finalCustomerPhone = effectiveClient?.phone || trimmedPhone || "";
 
       const finalPlate =
         createdTire.vehicleLicensePlate ||
-        exactVehicleMatch?.licensePlate ||
+        effectiveVehicle?.licensePlate ||
         formattedPlate ||
         "-";
 
       const finalTireType = normalizeTireType(
-        createdTire.brandConstantName || tireType
+        createdTire.brandConstantName || tireType,
       );
 
       const finalBrand = createdTire.modelConstantName || trimmedBrand;
@@ -551,8 +836,8 @@ export default function TireRecordModal({
         size: finalSize,
         quantity: finalQuantity,
         storageLocation: finalLocation,
-        vehicleNote: exactVehicleMatch?.note || trimmedVehicleNote,
-        photos,
+        vehicleNote: effectiveVehicle?.note || trimmedVehicleNote,
+        photos: uploadedPhotos,
         createdAt: createdTire.createdDate || new Date().toISOString(),
         updatedAt: createdTire.createdDate || new Date().toISOString(),
         status: "active",
@@ -566,8 +851,8 @@ export default function TireRecordModal({
           size: finalSize,
           quantity: finalQuantity,
           storageLocation: finalLocation,
-          vehicleNote: exactVehicleMatch?.note || trimmedVehicleNote
-        }
+          vehicleNote: effectiveVehicle?.note || trimmedVehicleNote,
+        },
       };
 
       showToast("Lastik emanet kaydı API'ye başarıyla kaydedildi.", "success");
@@ -579,419 +864,749 @@ export default function TireRecordModal({
         error instanceof Error
           ? error.message
           : "Lastik kaydı oluşturulurken beklenmeyen hata oluştu.",
-        "error"
+        "error",
       );
     } finally {
       setIsSaving(false);
+      setIsUploading(false);
+      setUploadProgress({ current: 0, total: 0 });
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+    <div
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/65 backdrop-blur-sm md:items-center md:p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          handleRequestClose();
+        }
+      }}
+    >
       <div
-        className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
+        className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl md:h-[min(90vh,820px)] md:max-w-5xl md:rounded-3xl md:border md:border-slate-200"
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-6 py-5">
-          <div>
-            <h3 className="text-base font-black text-slate-950">
-              Yeni Lastik Emaneti
-            </h3>
-            <p className="mt-1 text-xs font-semibold text-slate-400">
-              Müşteri ve araç bilgileri searchKey ile API üzerinden kontrol edilir.
-            </p>
+        <header className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">
+                Yeni emanet kaydı
+              </p>
+              <h3 className="mt-1 text-lg font-black text-slate-950 sm:text-xl">
+                Lastik Ekle
+              </h3>
+              <p className="mt-1 text-xs font-semibold text-slate-400">
+                Bilgileri üç kısa adımda tamamlayın.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleRequestClose}
+              disabled={isBusy}
+              className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Pencereyi kapat"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isSaving || isUploading}
-            className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            {WIZARD_STEPS.map((step, index) => {
+              const StepIcon = step.icon;
+              const isActive = currentStep === index;
+              const isCompleted = currentStep > index;
 
-        <div className="flex-1 overflow-y-auto p-6">
+              return (
+                <button
+                  key={step.title}
+                  type="button"
+                  onClick={() => {
+                    if (index < currentStep && !isBusy) {
+                      setCurrentStep(index as WizardStep);
+                    }
+                  }}
+                  disabled={isBusy || index > currentStep}
+                  className={`group flex min-w-0 items-center gap-2 rounded-2xl border px-3 py-3 text-left transition sm:px-4 ${
+                    isActive
+                      ? "border-blue-200 bg-blue-50"
+                      : isCompleted
+                        ? "border-emerald-100 bg-emerald-50"
+                        : "border-slate-200 bg-slate-50"
+                  } disabled:cursor-default`}
+                >
+                  <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                      isActive
+                        ? "bg-blue-600 text-white"
+                        : isCompleted
+                          ? "bg-emerald-500 text-white"
+                          : "bg-white text-slate-400"
+                    }`}
+                  >
+                    {isCompleted ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <StepIcon className="h-4 w-4" />
+                    )}
+                  </span>
+
+                  <span className="min-w-0">
+                    <span
+                      className={`block truncate text-xs font-black ${
+                        isActive
+                          ? "text-blue-700"
+                          : isCompleted
+                            ? "text-emerald-700"
+                            : "text-slate-500"
+                      }`}
+                    >
+                      {index + 1}. {step.title}
+                    </span>
+                    <span className="hidden truncate text-[10px] font-semibold text-slate-400 sm:block">
+                      {step.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </header>
+
+        <main className="min-h-0 flex-1 overflow-hidden bg-slate-50/80">
           {isLoading ? (
-            <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-700">
-              API verileri yükleniyor...
+            <div className="flex h-full items-center justify-center p-6">
+              <div className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4 text-sm font-black text-blue-700">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                API verileri yükleniyor...
+              </div>
             </div>
           ) : (
-            <div className="space-y-5">
-              <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="mb-4 flex items-center gap-2">
-                  <UserPlus className="h-4 w-4 text-blue-600" />
-                  <h4 className="text-sm font-black text-slate-900">
-                    Müşteri Bilgisi
-                  </h4>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Ad Soyad *
-                    </label>
-
-                    <input
-                      type="text"
-                      value={fullName}
-                      onChange={(event) => {
-                        setFullName(event.target.value);
-                        clearSelectedClient();
-                      }}
-                      disabled={isSaving}
-                      placeholder="Müşteri adı soyadı"
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Telefon *
-                    </label>
-
-                    <input
-                      type="text"
-                      value={phone}
-                      onChange={(event) => {
-                        setPhone(event.target.value);
-                        clearSelectedClient();
-                      }}
-                      disabled={isSaving}
-                      placeholder="0532 123 45 67"
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-
-                {isSearchingClient && (
-                  <p className="mt-3 text-xs font-bold text-blue-600">
-                    Müşteri API üzerinden aranıyor...
-                  </p>
-                )}
-
-                {selectedClientId && (
-                  <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700">
-                    Mevcut müşteri seçildi. Kayıtta müşteri ID gönderilecek.
-                  </div>
-                )}
-
-                {!selectedClientId && clientSearchResults.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                      API Eşleşmeleri
+            <div className="relative h-full overflow-hidden">
+              <section
+                aria-hidden={currentStep !== 0}
+                className={`absolute inset-0 h-full overflow-y-auto p-4 transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] sm:p-6 ${
+                  currentStep === 0
+                    ? "pointer-events-auto opacity-100"
+                    : "pointer-events-none opacity-0"
+                }`}
+                style={{
+                  display: currentStep === 0 ? "block" : "none",
+                  transform: "translateX(0)",
+                }}
+              >
+                <div className="mx-auto max-w-2xl">
+                  <div className="mb-5">
+                    <h4 className="text-xl font-black text-slate-950">
+                      Müşteri seçin
+                    </h4>
+                    <p className="mt-1 text-sm font-semibold text-slate-500">
+                      Kayıtlı müşteriyi seçin veya yeni müşteri bilgilerini
+                      girin.
                     </p>
-
-                    {clientSearchResults.map((client) => (
-                      <button
-                        key={client.id}
-                        type="button"
-                        onClick={() => handleSelectClient(client)}
-                        className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
-                      >
-                        <span>{client.name}</span>
-                        <span className="font-mono text-slate-400">
-                          {client.phone}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="mb-4 flex items-center gap-2">
-                  <Car className="h-4 w-4 text-blue-600" />
-                  <h4 className="text-sm font-black text-slate-900">
-                    Araç Bilgisi
-                  </h4>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Plaka *
-                    </label>
-
-                    <input
-                      type="text"
-                      value={plate}
-                      onChange={(event) => {
-                        setPlate(event.target.value);
-                        clearSelectedVehicle();
-                      }}
-                      disabled={isSaving}
-                      placeholder="19 ABC 123"
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 font-mono text-sm font-black uppercase tracking-wider text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    />
                   </div>
 
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Araç / Kayıt Notu
-                    </label>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+                    {selectedClientId ? (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-[11px] font-black uppercase tracking-wider text-emerald-600">
+                              Seçili müşteri
+                            </p>
+                            <p className="mt-1 text-base font-black text-slate-950">
+                              {fullName}
+                            </p>
+                            <p className="mt-1 font-mono text-sm font-bold text-slate-500">
+                              {phone}
+                            </p>
+                          </div>
 
-                    <input
-                      type="text"
-                      value={vehicleNote}
-                      onChange={(event) => setVehicleNote(event.target.value)}
-                      disabled={isSaving}
-                      placeholder="Jant çizik, balans istemedi vb."
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-
-                {isSearchingVehicle && (
-                  <p className="mt-3 text-xs font-bold text-blue-600">
-                    Araç API üzerinden aranıyor...
-                  </p>
-                )}
-
-                {selectedVehicleId && (
-                  <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700">
-                    Mevcut araç seçildi. Kayıtta araç ID gönderilecek.
-                  </div>
-                )}
-
-                {!selectedVehicleId && vehicleSearchResults.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                      API Eşleşmeleri
-                    </p>
-
-                    {vehicleSearchResults.map((vehicle) => (
-                      <button
-                        key={vehicle.id}
-                        type="button"
-                        onClick={() => handleSelectVehicle(vehicle)}
-                        className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
-                      >
-                        <span className="font-mono">{vehicle.licensePlate}</span>
-                        <span className="text-slate-400">
-                          {vehicle.clientName}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="mb-4 flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-blue-600" />
-                  <h4 className="text-sm font-black text-slate-900">
-                    Lastik Bilgisi
-                  </h4>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Mevsim Türü *
-                    </label>
-
-                    <div className="grid grid-cols-3 gap-1">
-                      {seasonOptions.map((type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          onClick={() => setTireType(type)}
-                          disabled={isSaving}
-                          className={`h-10 rounded-xl border text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                            tireType === type
-                              ? "border-blue-600 bg-blue-600 text-white"
-                              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                          }`}
-                        >
-                          {type}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Marka / Üretici *
-                    </label>
-
-                    <select
-                      value={brand}
-                      onChange={(event) => setBrand(event.target.value)}
-                      disabled={isSaving}
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    >
-                      <option value="">Marka seçin</option>
-                      {brandOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Ebat *
-                    </label>
-
-                    <input
-                      type="text"
-                      value={size}
-                      onChange={(event) => setSize(event.target.value)}
-                      disabled={isSaving}
-                      placeholder="205/55 R16"
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Adet *
-                    </label>
-
-                    <input
-                      type="number"
-                      min={1}
-                      value={quantity}
-                      onChange={(event) =>
-                        setQuantity(Math.max(1, Number(event.target.value)))
-                      }
-                      disabled={isSaving}
-                      className="h-12 w-28 rounded-2xl border border-slate-200 bg-white px-4 text-center text-sm font-black text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Depo Konumu / Raf
-                    </label>
-
-                    <input
-                      type="text"
-                      value={location}
-                      onChange={(event) => setLocation(event.target.value)}
-                      disabled={isSaving}
-                      placeholder="A5-3"
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 font-mono text-sm font-black uppercase text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="mb-4 flex items-center justify-between">
-                  <h4 className="text-sm font-black text-slate-900">
-                    Fotoğraflar
-                  </h4>
-
-                  <span className="text-xs font-bold text-slate-400">
-                    {photos.length} görsel
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <label className="flex h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white text-center transition hover:border-blue-500">
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      onChange={(event) => handlePhotoUpload(event.target.files)}
-                      disabled={isSaving || isUploading}
-                      className="hidden"
-                    />
-
-                    <Upload className="h-5 w-5 text-slate-400" />
-                    <span className="mt-1 text-xs font-black text-slate-700">
-                      Fotoğraf Yükle
-                    </span>
-                    <span className="mt-0.5 text-[10px] font-semibold text-slate-400">
-                      API / Files/Add
-                    </span>
-                  </label>
-
-                  <div className="md:col-span-2">
-                    {photos.length === 0 ? (
-                      <div className="flex h-24 items-center justify-center rounded-2xl border border-slate-200 bg-white text-xs font-bold text-slate-400">
-                        Henüz fotoğraf yüklenmedi.
+                          <button
+                            type="button"
+                            onClick={clearSelectedClient}
+                            disabled={isBusy}
+                            className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                          >
+                            Değiştir
+                          </button>
+                        </div>
                       </div>
                     ) : (
-                      <div className="flex min-h-24 flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2">
-                        {photos.map((photo) => (
-                          <div
-                            key={photo.id}
-                            className="group relative h-20 w-20 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
-                          >
-                            <img
-                              src={photo.dataUrl}
-                              alt={photo.name}
-                              referrerPolicy="no-referrer"
-                              className="h-full w-full object-cover"
-                            />
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-xs font-black text-slate-700">
+                            Ad Soyad *
+                          </label>
+                          <input
+                            type="text"
+                            value={fullName}
+                            onChange={(event) => {
+                              setFullName(event.target.value);
+                              clearSelectedClient();
+                            }}
+                            disabled={isBusy}
+                            placeholder="Müşteri adı soyadı"
+                            className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                          />
+                        </div>
 
+                        <div>
+                          <label className="mb-2 block text-xs font-black text-slate-700">
+                            Telefon *
+                          </label>
+                          <input
+                            type="tel"
+                            value={phone}
+                            onChange={(event) => {
+                              setPhone(event.target.value);
+                              clearSelectedClient();
+                            }}
+                            disabled={isBusy}
+                            placeholder="0532 123 45 67"
+                            className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {isSearchingClient && !selectedClientId && (
+                      <div className="mt-4 flex items-center gap-2 text-xs font-black text-blue-600">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Müşteri kayıtları aranıyor...
+                      </div>
+                    )}
+
+                    {!selectedClientId && clientSearchResults.length > 0 && (
+                      <div className="mt-5">
+                        <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">
+                          Eşleşen müşteriler
+                        </p>
+
+                        <div className="space-y-2">
+                          {clientSearchResults.map((client) => (
                             <button
+                              key={client.id}
                               type="button"
-                              onClick={() => handleRemovePhoto(photo.id)}
-                              disabled={isSaving}
-                              className="absolute inset-0 flex items-center justify-center bg-black/60 text-white opacity-0 transition group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              onClick={() => handleSelectClient(client)}
+                              disabled={isBusy}
+                              className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
                             >
-                              <Trash2 className="h-4 w-4 text-rose-300" />
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-black text-slate-800">
+                                  {client.name}
+                                </span>
+                                <span className="mt-0.5 block text-[11px] font-semibold text-slate-400">
+                                  Kayıtlı müşteri
+                                </span>
+                              </span>
+
+                              <span className="shrink-0 font-mono text-xs font-black text-slate-500">
+                                {client.phone}
+                              </span>
                             </button>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!selectedClientId && fullName.trim() && phone.trim() && (
+                      <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">
+                        Listeden bir müşteri seçmezseniz bu bilgilerle yeni
+                        müşteri oluşturulacak.
                       </div>
                     )}
                   </div>
                 </div>
+              </section>
 
-                {isUploading && (
-                  <p className="mt-3 text-xs font-black text-blue-600">
-                    Fotoğraflar API'ye yükleniyor...
-                  </p>
-                )}
+              <section
+                aria-hidden={currentStep !== 1}
+                className={`absolute inset-0 h-full overflow-y-auto p-4 transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] sm:p-6 ${
+                  currentStep === 1
+                    ? "pointer-events-auto opacity-100"
+                    : "pointer-events-none opacity-0"
+                }`}
+                style={{
+                  display: currentStep === 1 ? "block" : "none",
+                  transform: "translateX(0)",
+                }}
+              >
+                <div className="mx-auto max-w-2xl">
+                  <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <h4 className="text-xl font-black text-slate-950">
+                        Araç seçin
+                      </h4>
+                      <p className="mt-1 text-sm font-semibold text-slate-500">
+                        {effectiveClient?.name || fullName || "Seçilen müşteri"}
+                        için kayıtlı aracı seçin veya yeni plaka girin.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(0)}
+                      disabled={isBusy}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      Müşteriyi değiştir
+                    </button>
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+                    {selectedVehicleId ? (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-[11px] font-black uppercase tracking-wider text-emerald-600">
+                              Seçili araç
+                            </p>
+                            <p className="mt-1 font-mono text-lg font-black tracking-wider text-slate-950">
+                              {formatPlate(plate)}
+                            </p>
+                            {vehicleNote && (
+                              <p className="mt-1 text-xs font-semibold text-slate-500">
+                                {vehicleNote}
+                              </p>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={clearSelectedVehicle}
+                            disabled={isBusy}
+                            className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                          >
+                            Değiştir
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-xs font-black text-slate-700">
+                            Plaka *
+                          </label>
+                          <input
+                            type="text"
+                            value={plate}
+                            onChange={(event) => {
+                              setPlate(event.target.value);
+                              clearSelectedVehicle();
+                            }}
+                            disabled={isBusy}
+                            placeholder="19 ABC 123"
+                            className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 font-mono text-sm font-black uppercase tracking-wider text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-xs font-black text-slate-700">
+                            Araç / Kayıt Notu
+                          </label>
+                          <input
+                            type="text"
+                            value={vehicleNote}
+                            onChange={(event) =>
+                              setVehicleNote(event.target.value)
+                            }
+                            disabled={isBusy}
+                            placeholder="Jant çizik, balans istemedi vb."
+                            className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {isSearchingVehicle && !selectedVehicleId && (
+                      <div className="mt-4 flex items-center gap-2 text-xs font-black text-blue-600">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Araç kayıtları aranıyor...
+                      </div>
+                    )}
+
+                    {!selectedVehicleId &&
+                      filteredVehicleSearchResults.length > 0 && (
+                        <div className="mt-5">
+                          <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">
+                            Bu müşterinin araçları
+                          </p>
+
+                          <div className="space-y-2">
+                            {filteredVehicleSearchResults.map((vehicle) => (
+                              <button
+                                key={vehicle.id}
+                                type="button"
+                                onClick={() => handleSelectVehicle(vehicle)}
+                                disabled={isBusy}
+                                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
+                              >
+                                <span>
+                                  <span className="block font-mono text-sm font-black tracking-wider text-slate-900">
+                                    {vehicle.licensePlate}
+                                  </span>
+                                  <span className="mt-0.5 block text-[11px] font-semibold text-slate-400">
+                                    {vehicle.note || "Kayıtlı araç"}
+                                  </span>
+                                </span>
+
+                                <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {!selectedVehicleId && plate.trim() && (
+                      <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">
+                        Kayıtlı araç seçilmezse bu plaka ile yeni araç
+                        oluşturulacak.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section
+                aria-hidden={currentStep !== 2}
+                className={`absolute inset-0 h-full overflow-y-auto p-4 transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] sm:p-6 ${
+                  currentStep === 2
+                    ? "pointer-events-auto opacity-100"
+                    : "pointer-events-none opacity-0"
+                }`}
+                style={{
+                  display: currentStep === 2 ? "block" : "none",
+                  transform: "translateX(0)",
+                }}
+              >
+                <div className="mx-auto max-w-3xl">
+                  <div className="mb-5">
+                    <h4 className="text-xl font-black text-slate-950">
+                      Lastik bilgilerini tamamlayın
+                    </h4>
+                    <p className="mt-1 text-sm font-semibold text-slate-500">
+                      Fotoğraflar bu aşamada yalnızca cihazınızda bekletilir.
+                    </p>
+                  </div>
+
+                  <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(0)}
+                      disabled={isBusy}
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
+                    >
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        Müşteri
+                      </span>
+                      <span className="mt-1 block truncate text-sm font-black text-slate-800">
+                        {effectiveClient?.name || fullName}
+                      </span>
+                      <span className="mt-0.5 block font-mono text-xs font-bold text-slate-400">
+                        {effectiveClient?.phone || phone}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(1)}
+                      disabled={isBusy}
+                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
+                    >
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        Araç
+                      </span>
+                      <span className="mt-1 block font-mono text-sm font-black tracking-wider text-slate-800">
+                        {effectiveVehicle?.licensePlate || formatPlate(plate)}
+                      </span>
+                      <span className="mt-0.5 block truncate text-xs font-bold text-slate-400">
+                        {effectiveVehicle?.note ||
+                          vehicleNote ||
+                          "Not bulunmuyor"}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-xs font-black text-slate-700">
+                          Mevsim Türü *
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {seasonOptions.map((type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setTireType(type)}
+                              disabled={isBusy}
+                              className={`h-11 rounded-xl border text-[11px] font-black transition disabled:opacity-50 ${
+                                tireType === type
+                                  ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-600/20"
+                                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                              }`}
+                            >
+                              {type}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-black text-slate-700">
+                          Marka / Üretici *
+                        </label>
+                        <select
+                          value={brand}
+                          onChange={(event) => setBrand(event.target.value)}
+                          disabled={isBusy}
+                          className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                        >
+                          <option value="">Marka seçin</option>
+                          {brandOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-xs font-black text-slate-700">
+                          Ebat *
+                        </label>
+                        <input
+                          type="text"
+                          value={size}
+                          onChange={(event) => setSize(event.target.value)}
+                          disabled={isBusy}
+                          placeholder="205/55 R16"
+                          className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-2 block text-xs font-black text-slate-700">
+                            Adet *
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={quantity}
+                            onChange={(event) =>
+                              setQuantity(
+                                Math.max(1, Number(event.target.value) || 1),
+                              )
+                            }
+                            disabled={isBusy}
+                            className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-center text-sm font-black text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-xs font-black text-slate-700">
+                            Raf / Konum
+                          </label>
+                          <input
+                            type="text"
+                            value={location}
+                            onChange={(event) =>
+                              setLocation(event.target.value)
+                            }
+                            disabled={isBusy}
+                            placeholder="A5-3"
+                            className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 font-mono text-sm font-black uppercase text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-100"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 border-t border-slate-100 pt-5">
+                      <div className="mb-3 flex items-end justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Camera className="h-4 w-4 text-blue-600" />
+                            <h5 className="text-sm font-black text-slate-900">
+                              Lastik Fotoğrafları
+                            </h5>
+                          </div>
+                          <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                            Kaydet butonuna basılana kadar API'ye gönderilmez.
+                          </p>
+                        </div>
+
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500">
+                          {pendingPhotos.length} görsel
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 text-center transition hover:border-blue-500 hover:bg-blue-50">
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            capture="environment"
+                            onChange={(event) => {
+                              handleAddPhotos(event.target.files);
+                              event.currentTarget.value = "";
+                            }}
+                            disabled={isBusy}
+                            className="hidden"
+                          />
+
+                          <Upload className="h-5 w-5 text-blue-600" />
+                          <span className="mt-2 text-xs font-black text-slate-700">
+                            Fotoğraf Ekle
+                          </span>
+                          <span className="mt-0.5 text-[9px] font-semibold text-slate-400">
+                            Cihazda bekletilir
+                          </span>
+                        </label>
+
+                        {pendingPhotos.map((photo) => (
+                          <div
+                            key={photo.id}
+                            className="group relative aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"
+                          >
+                            <img
+                              src={photo.previewUrl}
+                              alt={photo.name}
+                              className="h-full w-full object-cover"
+                            />
+
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-6">
+                              <p className="truncate text-[9px] font-bold text-white">
+                                {photo.name}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePhoto(photo.id)}
+                              disabled={isBusy}
+                              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-xl bg-black/65 text-white opacity-100 transition hover:bg-rose-600 sm:opacity-0 sm:group-hover:opacity-100 disabled:opacity-40"
+                              aria-label={`${photo.name} fotoğrafını sil`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </section>
             </div>
           )}
-        </div>
+        </main>
 
-        <div className="border-t border-slate-200 bg-white px-6 py-4">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSaving || isUploading}
-              className="h-12 rounded-2xl border border-slate-200 bg-white text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Vazgeç
-            </button>
+        <footer className="border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
+          {isUploading && (
+            <div className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
+              <div className="flex items-center justify-between gap-3 text-xs font-black text-blue-700">
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Fotoğraflar yükleniyor
+                </span>
+                <span>
+                  {uploadProgress.current}/{uploadProgress.total}
+                </span>
+              </div>
 
-            <button
-              type="button"
-              onClick={() => handleSave(false)}
-              disabled={isSaving || isUploading || isLoading}
-              className="h-12 rounded-2xl border border-slate-200 bg-slate-100 text-xs font-black text-slate-800 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSaving ? "Kaydediliyor..." : "Kaydet"}
-            </button>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-blue-100">
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                  style={{
+                    width: `${
+                      uploadProgress.total > 0
+                        ? (uploadProgress.current / uploadProgress.total) * 100
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
-            <button
-              type="button"
-              onClick={() => handleSave(true)}
-              disabled={isSaving || isUploading || isLoading}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-blue-600 text-xs font-black text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSaving ? (
-                "Kaydediliyor..."
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              {currentStep > 0 ? (
+                <button
+                  type="button"
+                  onClick={handlePreviousStep}
+                  disabled={isBusy}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Geri
+                </button>
               ) : (
-                <>
-                  <Printer className="h-4 w-4" />
-                  Kaydet ve Barkodla
-                </>
+                <button
+                  type="button"
+                  onClick={handleRequestClose}
+                  disabled={isBusy}
+                  className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Vazgeç
+                </button>
               )}
-            </button>
+            </div>
+
+            {currentStep < 2 ? (
+              <button
+                type="button"
+                onClick={handleNextStep}
+                disabled={isBusy || isLoading}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-xs font-black text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isAdvancing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Kontrol ediliyor
+                  </>
+                ) : (
+                  <>
+                    Devam Et
+                    <ChevronRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSave(false)}
+                  disabled={isBusy || isLoading}
+                  className="h-11 rounded-2xl border border-slate-200 bg-slate-100 px-4 text-xs font-black text-slate-800 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSaving && !isUploading ? "Kaydediliyor..." : "Kaydet"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSave(true)}
+                  disabled={isBusy || isLoading}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 text-xs font-black text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      İşleniyor
+                    </>
+                  ) : (
+                    <>
+                      <Printer className="h-4 w-4" />
+                      Kaydet ve Barkodla
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
-        </div>
+        </footer>
       </div>
     </div>
   );

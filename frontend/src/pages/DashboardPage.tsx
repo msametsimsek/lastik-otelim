@@ -1,4 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type ReactNode
+} from "react";
+
 import {
   ArrowRight,
   Calendar,
@@ -11,7 +16,7 @@ import {
   Users
 } from "lucide-react";
 
-import {
+import type {
   Customer,
   SystemStats,
   TireRecord,
@@ -19,8 +24,8 @@ import {
 } from "../types";
 
 import {
-  HistoryListItemDto,
-  historyApi
+  historyApi,
+  type HistoryListItemDto
 } from "../services/tireApi";
 
 interface DashboardPageProps {
@@ -32,10 +37,10 @@ interface DashboardPageProps {
   }[];
   historyRefreshKey: number;
   onAddTireClick: () => void;
-onSearchRedirect: (
-  tab: "storage" | "customers",
-  query: string
-) => void;
+  onSearchRedirect: (
+    tab: "storage" | "customers",
+    query: string
+  ) => void;
   onOpenDetail: (record: TireRecord) => void;
   onOpenLabelPrinter: (record: TireRecord) => void;
 }
@@ -45,7 +50,9 @@ function formatDate(value?: string) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "-";
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
 
   return date.toLocaleDateString("tr-TR", {
     day: "2-digit",
@@ -59,7 +66,9 @@ function formatDateTime(value?: string) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "-";
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
 
   return date.toLocaleString("tr-TR", {
     day: "2-digit",
@@ -110,8 +119,11 @@ export default function DashboardPage({
   const [isHistoryLoading, setIsHistoryLoading] =
     useState(true);
 
-  const [historyError, setHistoryError] = useState("");
-  const [historyReloadKey, setHistoryReloadKey] = useState(0);
+  const [historyError, setHistoryError] =
+    useState("");
+
+  const [historyReloadKey, setHistoryReloadKey] =
+    useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -121,28 +133,39 @@ export default function DashboardPage({
         setIsHistoryLoading(true);
         setHistoryError("");
 
-        const response = await historyApi.getHistories({
-          page: 0,
-          pageSize: 8
-        });
+        const response =
+          await historyApi.getHistories({
+            page: 0,
+            pageSize: 8
+          });
 
         if (!isMounted) return;
 
-        const sortedItems = [...(response.items || [])]
+        const sortedItems = [
+          ...(response.items || [])
+        ]
           .sort(
             (first, second) =>
-              new Date(second.createdDate).getTime() -
-              new Date(first.createdDate).getTime()
+              new Date(
+                second.createdDate
+              ).getTime() -
+              new Date(
+                first.createdDate
+              ).getTime()
           )
           .slice(0, 8);
 
         setHistoryItems(sortedItems);
       } catch (error) {
-        console.error("İşlem geçmişi yüklenemedi:", error);
+        console.error(
+          "İşlem geçmişi yüklenemedi:",
+          error
+        );
 
         if (!isMounted) return;
 
         setHistoryItems([]);
+
         setHistoryError(
           error instanceof Error
             ? error.message
@@ -160,82 +183,102 @@ export default function DashboardPage({
     return () => {
       isMounted = false;
     };
-  }, [historyRefreshKey, historyReloadKey]);
+  }, [
+    historyRefreshKey,
+    historyReloadKey
+  ]);
 
   return (
-    <div className="space-y-6 pb-12 text-slate-950 animate-slide-in">
-      <section className="flex flex-col gap-5 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">
-            Genel Bakış
-          </p>
+    <div className="h-full min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+      <div className="mx-auto w-full max-w-[1600px] space-y-4 pb-4 text-slate-950 animate-slide-in sm:space-y-6 sm:pb-6">
+        {/* Dashboard başlığı */}
+        <section className="flex flex-col gap-5 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:rounded-3xl sm:p-6">
+          <div className="min-w-0">
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-600 sm:text-[10px]">
+              Genel Bakış
+            </p>
 
-          <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-            Lastik Oteli Yönetimi
-          </h2>
+            <h1 className="mt-2 text-xl font-black tracking-tight text-slate-950 sm:text-2xl">
+              Lastik Oteli Yönetimi
+            </h1>
 
-          <p className="mt-1 max-w-xl text-xs font-medium leading-relaxed text-slate-500">
-            Güncel emanet, müşteri ve depo durumunu tek ekrandan takip edin.
-          </p>
-        </div>
+            <p className="mt-1 max-w-xl text-xs font-medium leading-5 text-slate-500 sm:leading-relaxed">
+              Güncel emanet, müşteri ve depo
+              durumunu tek ekrandan takip edin.
+            </p>
+          </div>
 
-        <button
-          type="button"
-          onClick={onAddTireClick}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-xs font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4" />
-          Yeni Lastik Kaydı
-        </button>
-      </section>
+          <button
+            type="button"
+            onClick={onAddTireClick}
+            className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-xs font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 active:scale-[0.98] sm:w-auto sm:rounded-2xl"
+          >
+            <Plus className="h-4 w-4" />
+            Yeni Lastik Kaydı
+          </button>
+        </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          icon={<ClipboardList className="h-5 w-5" />}
-          label="Aktif Emanet"
-          value={stats.totalRecords}
-          iconClass="bg-blue-50 text-blue-600"
-        />
+        {/* İstatistik kartları */}
+        <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+          <StatCard
+            icon={
+              <ClipboardList className="h-5 w-5" />
+            }
+            label="Aktif Emanet"
+            value={stats.totalRecords}
+            iconClass="bg-blue-50 text-blue-600"
+          />
 
-        <StatCard
-          icon={<Layers className="h-5 w-5" />}
-          label="Raf Girilen Kayıt"
-          value={stats.inStorage}
-          iconClass="bg-amber-50 text-amber-600"
-        />
+          <StatCard
+            icon={<Layers className="h-5 w-5" />}
+            label="Raf Girilen Kayıt"
+            value={stats.inStorage}
+            iconClass="bg-amber-50 text-amber-600"
+          />
 
-        <StatCard
-          icon={<Users className="h-5 w-5" />}
-          label="Toplam Müşteri"
-          value={stats.totalCustomers}
-          iconClass="bg-violet-50 text-violet-600"
-        />
+          <StatCard
+            icon={<Users className="h-5 w-5" />}
+            label="Toplam Müşteri"
+            value={stats.totalCustomers}
+            iconClass="bg-violet-50 text-violet-600"
+          />
 
-        <StatCard
-          icon={<Calendar className="h-5 w-5" />}
-          label="Bu Ay Eklenen"
-          value={stats.addedThisMonth}
-          iconClass="bg-emerald-50 text-emerald-600"
-        />
-      </section>
+          <StatCard
+            icon={
+              <Calendar className="h-5 w-5" />
+            }
+            label="Bu Ay Eklenen"
+            value={stats.addedThisMonth}
+            iconClass="bg-emerald-50 text-emerald-600"
+          />
+        </section>
 
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <RecentRecordsModule
-          records={recentRecords}
-          onOpenDetail={onOpenDetail}
-          onOpenLabelPrinter={onOpenLabelPrinter}
-          onOpenStorage={() => onSearchRedirect("storage", "")}
-        />
+        {/* Dashboard listeleri */}
+        <section className="grid min-h-0 grid-cols-1 gap-4 sm:gap-6 xl:grid-cols-2">
+          <RecentRecordsModule
+            records={recentRecords}
+            onOpenDetail={onOpenDetail}
+            onOpenLabelPrinter={
+              onOpenLabelPrinter
+            }
+            onOpenStorage={() =>
+              onSearchRedirect("storage", "")
+            }
+          />
 
-        <HistoryModule
-          items={historyItems}
-          isLoading={isHistoryLoading}
-          errorMessage={historyError}
-          onReload={() =>
-            setHistoryReloadKey((currentKey) => currentKey + 1)
-          }
-        />
-      </section>
+          <HistoryModule
+            items={historyItems}
+            isLoading={isHistoryLoading}
+            errorMessage={historyError}
+            onReload={() =>
+              setHistoryReloadKey(
+                (currentKey) =>
+                  currentKey + 1
+              )
+            }
+          />
+        </section>
+      </div>
     </div>
   );
 }
@@ -252,18 +295,18 @@ function StatCard({
   iconClass: string;
 }) {
   return (
-    <article className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm">
+    <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
       <div
-        className={`flex h-10 w-10 items-center justify-center rounded-2xl ${iconClass}`}
+        className={`flex h-9 w-9 items-center justify-center rounded-xl sm:h-10 sm:w-10 sm:rounded-2xl ${iconClass}`}
       >
         {icon}
       </div>
 
-      <p className="mt-5 text-3xl font-black leading-none text-slate-950">
+      <p className="mt-4 truncate text-2xl font-black leading-none text-slate-950 sm:mt-5 sm:text-3xl">
         {value}
       </p>
 
-      <p className="mt-2 text-xs font-bold text-slate-500">
+      <p className="mt-2 text-[10px] font-bold leading-4 text-slate-500 sm:text-xs">
         {label}
       </p>
     </article>
@@ -282,18 +325,21 @@ function RecentRecordsModule({
     vehicle: Vehicle | undefined;
   }[];
   onOpenDetail: (record: TireRecord) => void;
-  onOpenLabelPrinter: (record: TireRecord) => void;
+  onOpenLabelPrinter: (
+    record: TireRecord
+  ) => void;
   onOpenStorage: () => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
-      <header className="flex items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/50 px-5 py-4">
-        <div>
-          <h3 className="text-sm font-black text-slate-900">
+    <section className="flex h-[430px] min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm sm:h-[480px] sm:rounded-3xl xl:h-[520px]">
+      {/* Sabit başlık */}
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/50 px-4 py-4 sm:px-5">
+        <div className="min-w-0">
+          <h2 className="text-sm font-black text-slate-900">
             Son Emanetler
-          </h3>
+          </h2>
 
-          <p className="mt-1 text-[11px] font-medium text-slate-400">
+          <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
             Son eklenen aktif lastik kayıtları
           </p>
         </div>
@@ -301,70 +347,93 @@ function RecentRecordsModule({
         <button
           type="button"
           onClick={onOpenStorage}
-          className="inline-flex items-center gap-1.5 text-[11px] font-black text-blue-600 transition hover:text-blue-700"
+          className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-black text-blue-600 transition hover:text-blue-700"
         >
           Depoya Git
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </header>
 
+      {/* Yalnızca emanet listesi kayar */}
       {records.length === 0 ? (
         <EmptyModule
-          icon={<ClipboardList className="h-7 w-7" />}
+          icon={
+            <ClipboardList className="h-7 w-7" />
+          }
           title="Henüz emanet kaydı yok"
           description="Yeni kayıtlar burada görüntülenecek."
         />
       ) : (
-        <div className="max-h-[520px] divide-y divide-slate-100 overflow-y-auto">
-          {records.map(({ record, customer, vehicle }) => (
-            <article
-              key={record.id}
-              className="flex flex-col gap-4 px-5 py-4 transition hover:bg-slate-50/70 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-[10px] font-black uppercase text-blue-700">
-                    {vehicle?.plate || "-"}
-                  </span>
+        <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+          {records.map(
+            ({
+              record,
+              customer,
+              vehicle
+            }) => (
+              <article
+                key={record.id}
+                className="flex flex-col gap-4 px-4 py-4 transition hover:bg-slate-50/70 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-[10px] font-black uppercase text-blue-700">
+                      {vehicle?.plate || "-"}
+                    </span>
 
-                  <span className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 font-mono text-[10px] font-black uppercase text-amber-700">
-                    {record.storageLocation || "Rafsız"}
-                  </span>
+                    <span className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 font-mono text-[10px] font-black uppercase text-amber-700">
+                      {record.storageLocation ||
+                        "Rafsız"}
+                    </span>
+                  </div>
+
+                  <h3 className="mt-2 truncate text-sm font-black text-slate-900">
+                    {customer?.fullName ||
+                      "Bilinmeyen Cari"}
+                  </h3>
+
+                  <p className="mt-1 truncate text-[11px] font-medium text-slate-500">
+                    {record.brand} •{" "}
+                    {record.size} •{" "}
+                    {record.quantity} adet
+                  </p>
+
+                  <p className="mt-1 truncate font-mono text-[10px] font-bold text-slate-400">
+                    {record.tireCode} •{" "}
+                    {formatDate(
+                      record.createdAt
+                    )}
+                  </p>
                 </div>
 
-                <h4 className="mt-2 truncate text-sm font-black text-slate-900">
-                  {customer?.fullName || "Bilinmeyen Cari"}
-                </h4>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenDetail(record)
+                    }
+                    className="min-h-10 flex-1 rounded-xl bg-slate-100 px-3.5 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-200 sm:flex-none"
+                  >
+                    İncele
+                  </button>
 
-                <p className="mt-1 text-[11px] font-medium text-slate-500">
-                  {record.brand} • {record.size} • {record.quantity} adet
-                </p>
-
-                <p className="mt-1 font-mono text-[10px] font-bold text-slate-400">
-                  {record.tireCode} • {formatDate(record.createdAt)}
-                </p>
-              </div>
-
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  onClick={() => onOpenDetail(record)}
-                  className="rounded-xl bg-slate-100 px-3.5 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-200"
-                >
-                  İncele
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onOpenLabelPrinter(record)}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600 transition hover:bg-blue-100"
-                  title="Etiket yazdır"
-                >
-                  <Printer className="h-4 w-4" />
-                </button>
-              </div>
-            </article>
-          ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenLabelPrinter(
+                        record
+                      )
+                    }
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600 transition hover:bg-blue-100"
+                    title="Etiket yazdır"
+                    aria-label="Etiket yazdır"
+                  >
+                    <Printer className="h-4 w-4" />
+                  </button>
+                </div>
+              </article>
+            )
+          )}
         </div>
       )}
     </section>
@@ -383,14 +452,15 @@ function HistoryModule({
   onReload: () => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
-      <header className="flex items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/50 px-5 py-4">
-        <div>
-          <h3 className="text-sm font-black text-slate-900">
+    <section className="flex h-[430px] min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm sm:h-[480px] sm:rounded-3xl xl:h-[520px]">
+      {/* Sabit başlık */}
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/50 px-4 py-4 sm:px-5">
+        <div className="min-w-0">
+          <h2 className="text-sm font-black text-slate-900">
             Son İşlemler
-          </h3>
+          </h2>
 
-          <p className="mt-1 text-[11px] font-medium text-slate-400">
+          <p className="mt-1 truncate text-[11px] font-medium text-slate-400">
             Giriş, düzenleme ve teslim hareketleri
           </p>
         </div>
@@ -399,15 +469,21 @@ function HistoryModule({
           type="button"
           onClick={onReload}
           disabled={isLoading}
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           title="İşlem geçmişini yenile"
+          aria-label="İşlem geçmişini yenile"
         >
           <RefreshCw
-            className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+            className={`h-4 w-4 ${
+              isLoading
+                ? "animate-spin"
+                : ""
+            }`}
           />
         </button>
       </header>
 
+      {/* Yalnızca işlem listesi kayar */}
       {isLoading ? (
         <EmptyModule
           icon={
@@ -418,25 +494,30 @@ function HistoryModule({
         />
       ) : errorMessage ? (
         <EmptyModule
-          icon={<History className="h-7 w-7" />}
+          icon={
+            <History className="h-7 w-7" />
+          }
           title="İşlemler yüklenemedi"
           description={errorMessage}
         />
       ) : items.length === 0 ? (
         <EmptyModule
-          icon={<History className="h-7 w-7" />}
+          icon={
+            <History className="h-7 w-7" />
+          }
           title="Henüz işlem kaydı yok"
           description="Sistem hareketleri burada görüntülenecek."
         />
       ) : (
-        <div className="max-h-[520px] divide-y divide-slate-100 overflow-y-auto">
+        <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
           {items.map((item) => {
-            const badge = getHistoryBadge(item);
+            const badge =
+              getHistoryBadge(item);
 
             return (
               <article
                 key={item.id}
-                className="flex flex-col gap-3 px-5 py-4 transition hover:bg-slate-50/70 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 px-4 py-4 transition hover:bg-slate-50/70 sm:flex-row sm:items-center sm:justify-between sm:px-5"
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -447,35 +528,42 @@ function HistoryModule({
                     </span>
 
                     <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-[10px] font-black uppercase text-blue-700">
-                      {item.licensePlate || "-"}
+                      {item.licensePlate ||
+                        "-"}
                     </span>
                   </div>
 
-                  <h4 className="mt-2 truncate text-sm font-black text-slate-900">
-                    {item.clientName || "Bilinmeyen Cari"}
-                  </h4>
+                  <h3 className="mt-2 truncate text-sm font-black text-slate-900">
+                    {item.clientName ||
+                      "Bilinmeyen Cari"}
+                  </h3>
 
-                  <p className="mt-1 text-[11px] font-medium text-slate-500">
-                    {item.model || "-"} • {item.sizes || "-"} •{" "}
+                  <p className="mt-1 truncate text-[11px] font-medium text-slate-500">
+                    {item.model || "-"} •{" "}
+                    {item.sizes || "-"} •{" "}
                     {item.count || 0} adet
                   </p>
 
-                  <p className="mt-1 font-mono text-[10px] font-bold text-slate-400">
+                  <p className="mt-1 truncate font-mono text-[10px] font-bold text-slate-400">
                     {item.code || "-"}
                   </p>
                 </div>
 
-                <div className="shrink-0 text-left sm:text-right">
+                <div className="shrink-0 text-left sm:max-w-[180px] sm:text-right">
                   <p className="text-[10px] font-bold text-slate-500">
-                    {formatDateTime(item.createdDate)}
+                    {formatDateTime(
+                      item.createdDate
+                    )}
                   </p>
 
-                  <p className="mt-1 max-w-[180px] truncate text-[10px] font-medium text-slate-400">
-                    {item.createdUsername || "-"}
+                  <p className="mt-1 truncate text-[10px] font-medium text-slate-400">
+                    {item.createdUsername ||
+                      "-"}
                   </p>
 
-                  <p className="mt-1 font-mono text-[10px] font-black uppercase text-amber-700">
-                    {item.storageLocation || "Raf belirtilmedi"}
+                  <p className="mt-1 truncate font-mono text-[10px] font-black uppercase text-amber-700">
+                    {item.storageLocation ||
+                      "Raf belirtilmedi"}
                   </p>
                 </div>
               </article>
@@ -497,7 +585,7 @@ function EmptyModule({
   description: string;
 }) {
   return (
-    <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 px-6 py-10 text-center text-slate-300">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center text-slate-300">
       {icon}
 
       <div>
