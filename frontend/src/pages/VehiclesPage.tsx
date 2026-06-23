@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent
+} from "react";
+
 import {
   ArrowLeft,
   Car,
@@ -6,6 +13,7 @@ import {
   Phone,
   Plus,
   Printer,
+  RefreshCw,
   Search,
   User,
   X
@@ -14,12 +22,10 @@ import {
 import { Customer, TireRecord, Vehicle } from "../types";
 import {
   searchPlaceholders,
+  VehicleListItemDto,
   vehicleApi
 } from "../services/tireApi";
-import {
-  formatPlate,
-  normalizeTurkish
-} from "../utils/helpers";
+import { formatPlate } from "../utils/helpers";
 
 interface VehiclesPageProps {
   vehicles: Vehicle[];
@@ -32,6 +38,57 @@ interface VehiclesPageProps {
     message: string,
     type: "success" | "error" | "info" | "warning"
   ) => void;
+}
+
+const VEHICLE_PAGE_SIZE = 20;
+
+type VehiclePaginationState = {
+  index: number;
+  size: number;
+  count: number;
+  pages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
+
+const EMPTY_VEHICLE_PAGINATION: VehiclePaginationState = {
+  index: 0,
+  size: VEHICLE_PAGE_SIZE,
+  count: 0,
+  pages: 0,
+  hasPrevious: false,
+  hasNext: false
+};
+
+function getStringValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function getNumberValue(value: unknown, fallback = 0) {
+  return typeof value === "number" ? value : fallback;
+}
+
+function mapApiVehicleToVehicle(vehicle: VehicleListItemDto): Vehicle {
+  const rawVehicle = vehicle as VehicleListItemDto & Record<string, unknown>;
+
+  return {
+    id: String(rawVehicle.id ?? ""),
+    clientId: String(
+      rawVehicle.clientId ??
+        rawVehicle.clientID ??
+        rawVehicle.customerId ??
+        ""
+    ),
+    plate:
+      getStringValue(rawVehicle.licensePlate) ||
+      getStringValue(rawVehicle.plate) ||
+      "-",
+    note: getStringValue(rawVehicle.note),
+    createdAt:
+      getStringValue(rawVehicle.createdDate) ||
+      getStringValue(rawVehicle.createdAt) ||
+      new Date().toISOString()
+  } as Vehicle;
 }
 
 function getVehicleCustomer(
@@ -63,12 +120,33 @@ export default function VehiclesPage({
   onOpenLabelPrinter,
   showToast
 }: VehiclesPageProps) {
+  const [pagedVehicles, setPagedVehicles] = useState<Vehicle[]>(() =>
+    vehicles.slice(0, VEHICLE_PAGE_SIZE)
+  );
+
   const [selectedVehicleId, setSelectedVehicleId] = useState(
     vehicles[0]?.id || ""
   );
 
   const [searchQuery, setSearchQuery] = useState("");
+
+  const [page, setPage] = useState(0);
+
+  const [pagination, setPagination] =
+    useState<VehiclePaginationState>({
+      ...EMPTY_VEHICLE_PAGINATION,
+      count: vehicles.length,
+      pages:
+        vehicles.length > 0
+          ? Math.ceil(vehicles.length / VEHICLE_PAGE_SIZE)
+          : 0,
+      hasNext: vehicles.length > VEHICLE_PAGE_SIZE
+    });
+
   const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
+
+  const [isLoadingVehicles, setIsLoadingVehicles] = useState(true);
+  const [vehicleErrorMessage, setVehicleErrorMessage] = useState("");
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
@@ -76,13 +154,106 @@ export default function VehiclesPage({
   const [newNote, setNewNote] = useState("");
   const [isCreatingVehicle, setIsCreatingVehicle] = useState(false);
 
+  const loadVehicles = useCallback(
+    async (
+      targetPage = page,
+      options?: {
+        search?: string;
+        preferredVehicleId?: string;
+      }
+    ) => {
+      const currentSearch = options?.search ?? searchQuery;
+
+      try {
+        setIsLoadingVehicles(true);
+        setVehicleErrorMessage("");
+
+        const response = await vehicleApi.getVehicles({
+          page: targetPage,
+          pageSize: VEHICLE_PAGE_SIZE,
+          searchKey: currentSearch
+        });
+
+        const items = (response.items || []).map(mapApiVehicleToVehicle);
+
+        setPagedVehicles(items);
+
+        setPagination({
+          index: response.index ?? targetPage,
+          size: response.size ?? VEHICLE_PAGE_SIZE,
+          count: response.count ?? items.length,
+          pages: response.pages ?? (items.length > 0 ? 1 : 0),
+          hasPrevious:
+            response.hasPrevious ?? targetPage > 0,
+          hasNext: response.hasNext ?? false
+        });
+
+        setSelectedVehicleId((currentId) => {
+          const preferredVehicleId = options?.preferredVehicleId;
+
+          if (
+            preferredVehicleId &&
+            items.some((vehicle) => vehicle.id === preferredVehicleId)
+          ) {
+            return preferredVehicleId;
+          }
+
+          if (
+            currentId &&
+            items.some((vehicle) => vehicle.id === currentId)
+          ) {
+            return currentId;
+          }
+
+          return items[0]?.id || "";
+        });
+
+        if (items.length === 0) {
+          setIsMobileDetailOpen(false);
+        }
+      } catch (error) {
+        console.error("Araçlar yüklenemedi:", error);
+
+        const fallbackVehicles = vehicles.slice(0, VEHICLE_PAGE_SIZE);
+
+        setPagedVehicles(fallbackVehicles);
+
+        setPagination({
+          ...EMPTY_VEHICLE_PAGINATION,
+          count: vehicles.length,
+          pages:
+            vehicles.length > 0
+              ? Math.ceil(vehicles.length / VEHICLE_PAGE_SIZE)
+              : 0,
+          hasNext: vehicles.length > VEHICLE_PAGE_SIZE
+        });
+
+        setSelectedVehicleId(fallbackVehicles[0]?.id || "");
+        setIsMobileDetailOpen(false);
+
+        setVehicleErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Araçlar yüklenirken beklenmeyen bir hata oluştu."
+        );
+      } finally {
+        setIsLoadingVehicles(false);
+      }
+    },
+    [vehicles, page, searchQuery]
+  );
+
   useEffect(() => {
-    const selectedVehicleExists = vehicles.some(
+    loadVehicles(page);
+  }, [loadVehicles, page]);
+
+  useEffect(() => {
+    const selectedVehicleExists = pagedVehicles.some(
       (vehicle) => vehicle.id === selectedVehicleId
     );
 
     if (!selectedVehicleExists) {
-      const nextVehicleId = vehicles[0]?.id || "";
+      const nextVehicleId = pagedVehicles[0]?.id || "";
 
       setSelectedVehicleId(nextVehicleId);
 
@@ -90,30 +261,9 @@ export default function VehiclesPage({
         setIsMobileDetailOpen(false);
       }
     }
-  }, [vehicles, selectedVehicleId]);
+  }, [pagedVehicles, selectedVehicleId]);
 
-  const filteredVehicles = useMemo(() => {
-    const normalizedQuery = normalizeTurkish(searchQuery.trim());
-
-    if (!normalizedQuery) return vehicles;
-
-    return vehicles.filter((vehicle) => {
-      const customer = getVehicleCustomer(vehicle, customers);
-
-      const searchableText = [
-        vehicle.plate,
-        vehicle.note || "",
-        customer?.fullName || "",
-        customer?.phone || ""
-      ]
-        .filter(Boolean)
-        .join(" ");
-
-      return normalizeTurkish(searchableText).includes(normalizedQuery);
-    });
-  }, [vehicles, customers, searchQuery]);
-
-  const selectedVehicle = vehicles.find(
+  const selectedVehicle = pagedVehicles.find(
     (vehicle) => vehicle.id === selectedVehicleId
   );
 
@@ -144,9 +294,42 @@ export default function VehiclesPage({
       });
   }, [selectedVehicleRecords]);
 
+  const totalRecords = pagination.count;
+  const totalPages = pagination.pages;
+  const currentPageNumber =
+    totalPages === 0 ? 0 : page + 1;
+
+  const canGoPrevious =
+    !isLoadingVehicles && (pagination.hasPrevious || page > 0);
+
+  const canGoNext =
+    !isLoadingVehicles &&
+    (pagination.hasNext ||
+      (totalPages > 0 && page < totalPages - 1));
+
   const handleSelectVehicle = (vehicleId: string) => {
     setSelectedVehicleId(vehicleId);
     setIsMobileDetailOpen(true);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(0);
+    setIsMobileDetailOpen(false);
+  };
+
+  const handlePreviousPage = () => {
+    if (!canGoPrevious) return;
+
+    setPage((currentPage) => Math.max(0, currentPage - 1));
+    setIsMobileDetailOpen(false);
+  };
+
+  const handleNextPage = () => {
+    if (!canGoNext) return;
+
+    setPage((currentPage) => currentPage + 1);
+    setIsMobileDetailOpen(false);
   };
 
   const resetAddVehicleForm = () => {
@@ -185,7 +368,14 @@ export default function VehiclesPage({
 
       await onRefreshData();
 
-      setSelectedVehicleId(String(createdVehicle.id));
+      setSearchQuery("");
+      setPage(0);
+
+      await loadVehicles(0, {
+        search: "",
+        preferredVehicleId: String(createdVehicle.id)
+      });
+
       setIsMobileDetailOpen(true);
 
       resetAddVehicleForm();
@@ -220,18 +410,35 @@ export default function VehiclesPage({
             </h2>
 
             <p className="mt-1 text-[11px] font-medium text-slate-400">
-              {vehicles.length} kayıtlı araç
+              {totalRecords} kayıtlı araç
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98] sm:px-4"
-          >
-            <Plus className="h-4 w-4" />
-            Yeni Araç
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loadVehicles(page)}
+              disabled={isLoadingVehicles}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Araçları yenile"
+              aria-label="Araçları yenile"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  isLoadingVehicles ? "animate-spin" : ""
+                }`}
+              />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsAddModalOpen(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98] sm:px-4"
+            >
+              <Plus className="h-4 w-4" />
+              Yeni Araç
+            </button>
+          </div>
         </header>
 
         {/* Sabit arama alanı */}
@@ -242,7 +449,9 @@ export default function VehiclesPage({
             <input
               type="text"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) =>
+                handleSearchChange(event.target.value)
+              }
               placeholder={searchPlaceholders.vehicle}
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-xs font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
             />
@@ -251,7 +460,35 @@ export default function VehiclesPage({
 
         {/* Yalnızca araç listesi kayar */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-          {filteredVehicles.length === 0 ? (
+          {isLoadingVehicles ? (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
+              <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
+              <p className="text-xs font-bold text-slate-500">
+                Araçlar yükleniyor
+              </p>
+            </div>
+          ) : vehicleErrorMessage ? (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
+              <Car className="h-8 w-8 text-rose-300" />
+
+              <p className="text-xs font-black text-rose-700">
+                Araçlar yüklenemedi
+              </p>
+
+              <p className="text-[11px] font-medium leading-relaxed text-rose-500">
+                {vehicleErrorMessage}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => loadVehicles(page)}
+                className="mt-1 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+              >
+                Tekrar Dene
+              </button>
+            </div>
+          ) : pagedVehicles.length === 0 ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
               <Car className="h-7 w-7 text-slate-300" />
 
@@ -261,7 +498,7 @@ export default function VehiclesPage({
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {filteredVehicles.map((vehicle) => {
+              {pagedVehicles.map((vehicle) => {
                 const customer = getVehicleCustomer(
                   vehicle,
                   customers
@@ -319,6 +556,36 @@ export default function VehiclesPage({
             </div>
           )}
         </div>
+
+        <footer className="shrink-0 border-t border-slate-100 bg-white p-3">
+          <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-bold text-slate-400">
+            <span>Toplam {totalRecords} kayıt</span>
+
+            <span>
+              Sayfa {currentPageNumber} / {totalPages}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handlePreviousPage}
+              disabled={!canGoPrevious}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600 transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Önceki
+            </button>
+
+            <button
+              type="button"
+              onClick={handleNextPage}
+              disabled={!canGoNext}
+              className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Sonraki
+            </button>
+          </div>
+        </footer>
       </section>
 
       {/* Araç detay alanı */}

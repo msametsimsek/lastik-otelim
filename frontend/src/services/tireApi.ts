@@ -25,6 +25,8 @@ export interface GetListParams {
   pageSize?: number;
   searchKey?: string;
 }
+export const DEFAULT_PAGE = 0;
+export const DEFAULT_PAGE_SIZE = 20;
 
 export interface HistoryListParams extends GetListParams {
   count?: number;
@@ -232,8 +234,11 @@ function getErrorMessage(data: unknown): string {
 function buildGetListQuery(params: GetListParams = {}): string {
   const query = new URLSearchParams();
 
-  query.set("pageRequest.Page", String(params.page ?? 0));
-  query.set("pageRequest.PageSize", String(params.pageSize ?? 1000));
+  query.set("pageRequest.Page", String(params.page ?? DEFAULT_PAGE));
+  query.set(
+    "pageRequest.PageSize",
+    String(params.pageSize ?? DEFAULT_PAGE_SIZE)
+  );
 
   const searchKey = params.searchKey?.trim();
 
@@ -350,7 +355,10 @@ export const constantApi = {
 };
 
 export const tireApi = {
-  getTires(pageOrParams: number | GetListParams = 0, pageSize = 1000) {
+  getTires(
+    pageOrParams: number | GetListParams = DEFAULT_PAGE,
+    pageSize = DEFAULT_PAGE_SIZE
+  ) {
     const params =
       typeof pageOrParams === "number"
         ? { page: pageOrParams, pageSize }

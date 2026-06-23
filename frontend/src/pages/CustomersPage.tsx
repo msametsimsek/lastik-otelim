@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent
+} from "react";
+
 import {
   ArrowLeft,
   Calendar,
@@ -6,14 +13,19 @@ import {
   Phone,
   Plus,
   Printer,
+  RefreshCw,
   Search,
   User,
   X
 } from "lucide-react";
 
 import { Customer, TireRecord, Vehicle } from "../types";
-import { clientApi, searchPlaceholders } from "../services/tireApi";
-import { formatDate, normalizeTurkish } from "../utils/helpers";
+import {
+  clientApi,
+  ClientListItemDto,
+  searchPlaceholders
+} from "../services/tireApi";
+import { formatDate } from "../utils/helpers";
 
 interface CustomersPageProps {
   customers: Customer[];
@@ -26,6 +38,47 @@ interface CustomersPageProps {
     message: string,
     type: "success" | "error" | "info" | "warning"
   ) => void;
+}
+
+const CUSTOMER_PAGE_SIZE = 20;
+
+type CustomerPaginationState = {
+  index: number;
+  size: number;
+  count: number;
+  pages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
+
+const EMPTY_CUSTOMER_PAGINATION: CustomerPaginationState = {
+  index: 0,
+  size: CUSTOMER_PAGE_SIZE,
+  count: 0,
+  pages: 0,
+  hasPrevious: false,
+  hasNext: false
+};
+
+function getStringValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function mapApiClientToCustomer(client: ClientListItemDto): Customer {
+  const rawClient = client as ClientListItemDto & Record<string, unknown>;
+
+  return {
+    id: String(rawClient.id ?? ""),
+    fullName:
+      getStringValue(rawClient.name) ||
+      getStringValue(rawClient.fullName) ||
+      "İsimsiz Müşteri",
+    phone: getStringValue(rawClient.phone),
+    createdAt:
+      getStringValue(rawClient.createdDate) ||
+      getStringValue(rawClient.createdAt) ||
+      new Date().toISOString()
+  } as Customer;
 }
 
 function getCustomerVehicles(customerId: string, vehicles: Vehicle[]) {
@@ -48,25 +101,139 @@ export default function CustomersPage({
   onOpenLabelPrinter,
   showToast
 }: CustomersPageProps) {
+  const [pagedCustomers, setPagedCustomers] = useState<Customer[]>(() =>
+    customers.slice(0, CUSTOMER_PAGE_SIZE)
+  );
+
   const [selectedCustomerId, setSelectedCustomerId] = useState(
     customers[0]?.id || ""
   );
 
   const [searchQuery, setSearchQuery] = useState("");
+
+  const [page, setPage] = useState(0);
+
+  const [pagination, setPagination] =
+    useState<CustomerPaginationState>({
+      ...EMPTY_CUSTOMER_PAGINATION,
+      count: customers.length,
+      pages:
+        customers.length > 0
+          ? Math.ceil(customers.length / CUSTOMER_PAGE_SIZE)
+          : 0,
+      hasNext: customers.length > CUSTOMER_PAGE_SIZE
+    });
+
   const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
+
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(true);
+  const [customerErrorMessage, setCustomerErrorMessage] = useState("");
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
 
+  const loadCustomers = useCallback(
+    async (
+      targetPage = page,
+      options?: {
+        search?: string;
+        preferredCustomerId?: string;
+      }
+    ) => {
+      const currentSearch = options?.search ?? searchQuery;
+
+      try {
+        setIsLoadingCustomers(true);
+        setCustomerErrorMessage("");
+
+        const response = await clientApi.getClients({
+          page: targetPage,
+          pageSize: CUSTOMER_PAGE_SIZE,
+          searchKey: currentSearch
+        });
+
+        const items = (response.items || []).map(mapApiClientToCustomer);
+
+        setPagedCustomers(items);
+
+        setPagination({
+          index: response.index ?? targetPage,
+          size: response.size ?? CUSTOMER_PAGE_SIZE,
+          count: response.count ?? items.length,
+          pages: response.pages ?? (items.length > 0 ? 1 : 0),
+          hasPrevious:
+            response.hasPrevious ?? targetPage > 0,
+          hasNext: response.hasNext ?? false
+        });
+
+        setSelectedCustomerId((currentId) => {
+          const preferredCustomerId = options?.preferredCustomerId;
+
+          if (
+            preferredCustomerId &&
+            items.some((customer) => customer.id === preferredCustomerId)
+          ) {
+            return preferredCustomerId;
+          }
+
+          if (
+            currentId &&
+            items.some((customer) => customer.id === currentId)
+          ) {
+            return currentId;
+          }
+
+          return items[0]?.id || "";
+        });
+
+        if (items.length === 0) {
+          setIsMobileDetailOpen(false);
+        }
+      } catch (error) {
+        console.error("Müşteriler yüklenemedi:", error);
+
+        const fallbackCustomers = customers.slice(0, CUSTOMER_PAGE_SIZE);
+
+        setPagedCustomers(fallbackCustomers);
+
+        setPagination({
+          ...EMPTY_CUSTOMER_PAGINATION,
+          count: customers.length,
+          pages:
+            customers.length > 0
+              ? Math.ceil(customers.length / CUSTOMER_PAGE_SIZE)
+              : 0,
+          hasNext: customers.length > CUSTOMER_PAGE_SIZE
+        });
+
+        setSelectedCustomerId(fallbackCustomers[0]?.id || "");
+        setIsMobileDetailOpen(false);
+
+        setCustomerErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Müşteriler yüklenirken beklenmeyen bir hata oluştu."
+        );
+      } finally {
+        setIsLoadingCustomers(false);
+      }
+    },
+    [customers, page, searchQuery]
+  );
+
   useEffect(() => {
-    const selectedCustomerExists = customers.some(
+    loadCustomers(page);
+  }, [loadCustomers, page]);
+
+  useEffect(() => {
+    const selectedCustomerExists = pagedCustomers.some(
       (customer) => customer.id === selectedCustomerId
     );
 
     if (!selectedCustomerExists) {
-      const nextCustomerId = customers[0]?.id || "";
+      const nextCustomerId = pagedCustomers[0]?.id || "";
 
       setSelectedCustomerId(nextCustomerId);
 
@@ -74,32 +241,9 @@ export default function CustomersPage({
         setIsMobileDetailOpen(false);
       }
     }
-  }, [customers, selectedCustomerId]);
+  }, [pagedCustomers, selectedCustomerId]);
 
-  const filteredCustomers = useMemo(() => {
-    const normalizedQuery = normalizeTurkish(searchQuery.trim());
-
-    if (!normalizedQuery) return customers;
-
-    return customers.filter((customer) => {
-      const customerVehicles = getCustomerVehicles(customer.id, vehicles);
-
-      const searchableText = [
-        customer.fullName,
-        customer.phone,
-        ...customerVehicles.flatMap((vehicle) => [
-          vehicle.plate,
-          vehicle.note || ""
-        ])
-      ]
-        .filter(Boolean)
-        .join(" ");
-
-      return normalizeTurkish(searchableText).includes(normalizedQuery);
-    });
-  }, [customers, vehicles, searchQuery]);
-
-  const selectedCustomer = customers.find(
+  const selectedCustomer = pagedCustomers.find(
     (customer) => customer.id === selectedCustomerId
   );
 
@@ -119,9 +263,42 @@ export default function CustomersPage({
     [selectedCustomer, records]
   );
 
+  const totalRecords = pagination.count;
+  const totalPages = pagination.pages;
+  const currentPageNumber =
+    totalPages === 0 ? 0 : page + 1;
+
+  const canGoPrevious =
+    !isLoadingCustomers && (pagination.hasPrevious || page > 0);
+
+  const canGoNext =
+    !isLoadingCustomers &&
+    (pagination.hasNext ||
+      (totalPages > 0 && page < totalPages - 1));
+
   const handleSelectCustomer = (customerId: string) => {
     setSelectedCustomerId(customerId);
     setIsMobileDetailOpen(true);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(0);
+    setIsMobileDetailOpen(false);
+  };
+
+  const handlePreviousPage = () => {
+    if (!canGoPrevious) return;
+
+    setPage((currentPage) => Math.max(0, currentPage - 1));
+    setIsMobileDetailOpen(false);
+  };
+
+  const handleNextPage = () => {
+    if (!canGoNext) return;
+
+    setPage((currentPage) => currentPage + 1);
+    setIsMobileDetailOpen(false);
   };
 
   const resetAddCustomerForm = () => {
@@ -157,7 +334,14 @@ export default function CustomersPage({
 
       await onRefreshData();
 
-      setSelectedCustomerId(String(createdCustomer.id));
+      setSearchQuery("");
+      setPage(0);
+
+      await loadCustomers(0, {
+        search: "",
+        preferredCustomerId: String(createdCustomer.id)
+      });
+
       setIsMobileDetailOpen(true);
 
       resetAddCustomerForm();
@@ -192,18 +376,35 @@ export default function CustomersPage({
             </h2>
 
             <p className="mt-1 text-[11px] font-medium text-slate-400">
-              {customers.length} kayıtlı müşteri
+              {totalRecords} kayıtlı müşteri
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98] sm:px-4"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Yeni Müşteri</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loadCustomers(page)}
+              disabled={isLoadingCustomers}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Müşterileri yenile"
+              aria-label="Müşterileri yenile"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  isLoadingCustomers ? "animate-spin" : ""
+                }`}
+              />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsAddModalOpen(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98] sm:px-4"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Yeni Müşteri</span>
+            </button>
+          </div>
         </header>
 
         {/* Sabit arama alanı */}
@@ -214,7 +415,9 @@ export default function CustomersPage({
             <input
               type="text"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) =>
+                handleSearchChange(event.target.value)
+              }
               placeholder={searchPlaceholders.client}
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-xs font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
             />
@@ -223,7 +426,35 @@ export default function CustomersPage({
 
         {/* Yalnızca müşteri listesi kayar */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-          {filteredCustomers.length === 0 ? (
+          {isLoadingCustomers ? (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
+              <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
+              <p className="text-xs font-bold text-slate-500">
+                Müşteriler yükleniyor
+              </p>
+            </div>
+          ) : customerErrorMessage ? (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
+              <User className="h-8 w-8 text-rose-300" />
+
+              <p className="text-xs font-black text-rose-700">
+                Müşteriler yüklenemedi
+              </p>
+
+              <p className="text-[11px] font-medium leading-relaxed text-rose-500">
+                {customerErrorMessage}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => loadCustomers(page)}
+                className="mt-1 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+              >
+                Tekrar Dene
+              </button>
+            </div>
+          ) : pagedCustomers.length === 0 ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
               <User className="h-7 w-7 text-slate-300" />
 
@@ -233,7 +464,7 @@ export default function CustomersPage({
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {filteredCustomers.map((customer) => {
+              {pagedCustomers.map((customer) => {
                 const customerVehicles = getCustomerVehicles(
                   customer.id,
                   vehicles
@@ -298,6 +529,36 @@ export default function CustomersPage({
             </div>
           )}
         </div>
+
+        <footer className="shrink-0 border-t border-slate-100 bg-white p-3">
+          <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-bold text-slate-400">
+            <span>Toplam {totalRecords} kayıt</span>
+
+            <span>
+              Sayfa {currentPageNumber} / {totalPages}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handlePreviousPage}
+              disabled={!canGoPrevious}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600 transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Önceki
+            </button>
+
+            <button
+              type="button"
+              onClick={handleNextPage}
+              disabled={!canGoNext}
+              className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Sonraki
+            </button>
+          </div>
+        </footer>
       </section>
 
       {/* Müşteri detay alanı */}

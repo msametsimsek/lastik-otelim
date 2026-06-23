@@ -1,6 +1,6 @@
 import {
+  useCallback,
   useEffect,
-  useMemo,
   useState,
   type ReactNode
 } from "react";
@@ -25,8 +25,6 @@ import {
   historyApi
 } from "../services/tireApi";
 
-import { normalizeTurkish } from "../utils/helpers";
-
 type HistoryFilter = "all" | "add" | "update" | "delete";
 
 const HISTORY_FILTERS: {
@@ -38,6 +36,26 @@ const HISTORY_FILTERS: {
   { id: "update", label: "Düzenleme" },
   { id: "delete", label: "Teslim" }
 ];
+
+const HISTORY_PAGE_SIZE = 20;
+
+type HistoryPaginationState = {
+  index: number;
+  size: number;
+  count: number;
+  pages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
+
+const EMPTY_HISTORY_PAGINATION: HistoryPaginationState = {
+  index: 0,
+  size: HISTORY_PAGE_SIZE,
+  count: 0,
+  pages: 0,
+  hasPrevious: false,
+  hasNext: false
+};
 
 function formatHistoryDate(value?: string) {
   if (!value) return "-";
@@ -108,131 +126,156 @@ export default function HistoryPage() {
   const [selectedFilter, setSelectedFilter] =
     useState<HistoryFilter>("all");
 
+  const [page, setPage] = useState(0);
+
+  const [pagination, setPagination] =
+    useState<HistoryPaginationState>(
+      EMPTY_HISTORY_PAGINATION
+    );
+
   const [isMobileDetailOpen, setIsMobileDetailOpen] =
     useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const loadHistories = async () => {
-    try {
-      setIsLoading(true);
-      setErrorMessage("");
+  const loadHistories = useCallback(
+    async (targetPage = page) => {
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
 
-      const response = await historyApi.getHistories({
-        page: 0,
-        pageSize: 1000
-      });
+        const response = await historyApi.getHistories({
+          page: targetPage,
+          pageSize: HISTORY_PAGE_SIZE,
+          searchKey: searchQuery,
+          typeConstantValue:
+            selectedFilter === "all"
+              ? undefined
+              : selectedFilter
+        });
 
-      const items = [...(response.items || [])].sort(
-        (a, b) =>
-          new Date(b.createdDate).getTime() -
-          new Date(a.createdDate).getTime()
-      );
+        const items = [...(response.items || [])].sort(
+          (a, b) =>
+            new Date(b.createdDate).getTime() -
+            new Date(a.createdDate).getTime()
+        );
 
-      setHistories(items);
+        setHistories(items);
 
-      setSelectedHistoryId((currentId) => {
-        if (
-          currentId &&
-          items.some((item) => item.id === currentId)
-        ) {
-          return currentId;
+        setPagination({
+          index: response.index ?? targetPage,
+          size: response.size ?? HISTORY_PAGE_SIZE,
+          count: response.count ?? items.length,
+          pages: response.pages ?? (items.length > 0 ? 1 : 0),
+          hasPrevious:
+            response.hasPrevious ?? targetPage > 0,
+          hasNext: response.hasNext ?? false
+        });
+
+        setSelectedHistoryId((currentId) => {
+          if (
+            currentId &&
+            items.some((item) => item.id === currentId)
+          ) {
+            return currentId;
+          }
+
+          return items[0]?.id ?? null;
+        });
+
+        if (items.length === 0) {
+          setIsMobileDetailOpen(false);
         }
+      } catch (error) {
+        console.error("İşlem geçmişi yüklenemedi:", error);
 
-        return items[0]?.id ?? null;
-      });
-
-      if (items.length === 0) {
+        setHistories([]);
+        setSelectedHistoryId(null);
+        setPagination(EMPTY_HISTORY_PAGINATION);
         setIsMobileDetailOpen(false);
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "İşlem geçmişi yüklenirken beklenmeyen bir hata oluştu."
+        );
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error("İşlem geçmişi yüklenemedi:", error);
-
-      setHistories([]);
-      setSelectedHistoryId(null);
-      setIsMobileDetailOpen(false);
-
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "İşlem geçmişi yüklenirken beklenmeyen bir hata oluştu."
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+    [page, searchQuery, selectedFilter]
+  );
 
   useEffect(() => {
-    loadHistories();
-  }, []);
-
-  const filteredHistories = useMemo(() => {
-    const normalizedQuery = normalizeTurkish(
-      searchQuery.trim()
-    );
-
-    return histories.filter((history) => {
-      if (
-        selectedFilter !== "all" &&
-        history.typeConstantValue !== selectedFilter
-      ) {
-        return false;
-      }
-
-      if (!normalizedQuery) return true;
-
-      const searchableText = [
-        history.clientName,
-        history.licensePlate,
-        history.model,
-        history.brand,
-        history.sizes,
-        history.code,
-        history.storageLocation,
-        history.typeConstantName,
-        history.createdUsername
-      ]
-        .filter(Boolean)
-        .join(" ");
-
-      return normalizeTurkish(searchableText).includes(
-        normalizedQuery
-      );
-    });
-  }, [histories, searchQuery, selectedFilter]);
+    loadHistories(page);
+  }, [loadHistories, page]);
 
   useEffect(() => {
     if (
       selectedHistoryId &&
-      filteredHistories.some(
-        (item) => item.id === selectedHistoryId
-      )
+      histories.some((item) => item.id === selectedHistoryId)
     ) {
       return;
     }
 
-    const nextHistoryId =
-      filteredHistories[0]?.id ?? null;
+    const nextHistoryId = histories[0]?.id ?? null;
 
     setSelectedHistoryId(nextHistoryId);
 
     if (!nextHistoryId) {
       setIsMobileDetailOpen(false);
     }
-  }, [filteredHistories, selectedHistoryId]);
+  }, [histories, selectedHistoryId]);
 
   const selectedHistory = histories.find(
     (history) => history.id === selectedHistoryId
   );
+
+  const totalRecords = pagination.count;
+  const totalPages = pagination.pages;
+  const currentPageNumber =
+    totalPages === 0 ? 0 : page + 1;
+
+  const canGoPrevious =
+    !isLoading && (pagination.hasPrevious || page > 0);
+
+  const canGoNext =
+    !isLoading &&
+    (pagination.hasNext ||
+      (totalPages > 0 && page < totalPages - 1));
 
   const handleSelectHistory = (historyId: number) => {
     setSelectedHistoryId(historyId);
     setIsMobileDetailOpen(true);
   };
 
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(0);
+    setIsMobileDetailOpen(false);
+  };
+
   const handleFilterChange = (filter: HistoryFilter) => {
     setSelectedFilter(filter);
+    setPage(0);
+    setIsMobileDetailOpen(false);
+  };
+
+  const handlePreviousPage = () => {
+    if (!canGoPrevious) return;
+
+    setPage((currentPage) =>
+      Math.max(0, currentPage - 1)
+    );
+
+    setIsMobileDetailOpen(false);
+  };
+
+  const handleNextPage = () => {
+    if (!canGoNext) return;
+
+    setPage((currentPage) => currentPage + 1);
     setIsMobileDetailOpen(false);
   };
 
@@ -251,13 +294,13 @@ export default function HistoryPage() {
             </h2>
 
             <p className="mt-1 text-[11px] font-medium text-slate-400">
-              {histories.length} işlem kaydı
+              {totalRecords} işlem kaydı
             </p>
           </div>
 
           <button
             type="button"
-            onClick={loadHistories}
+            onClick={() => loadHistories(page)}
             disabled={isLoading}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
             title="Geçmişi yenile"
@@ -280,7 +323,7 @@ export default function HistoryPage() {
               type="text"
               value={searchQuery}
               onChange={(event) =>
-                setSearchQuery(event.target.value)
+                handleSearchChange(event.target.value)
               }
               placeholder="Müşteri, plaka, kod veya kullanıcı ara..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-xs font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
@@ -333,13 +376,13 @@ export default function HistoryPage() {
 
               <button
                 type="button"
-                onClick={loadHistories}
+                onClick={() => loadHistories(page)}
                 className="mt-1 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
               >
                 Tekrar Dene
               </button>
             </div>
-          ) : filteredHistories.length === 0 ? (
+          ) : histories.length === 0 ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
               <Activity className="h-7 w-7 text-slate-300" />
 
@@ -349,7 +392,7 @@ export default function HistoryPage() {
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {filteredHistories.map((history) => {
+              {histories.map((history) => {
                 const visual = getHistoryVisual(
                   history.typeConstantValue
                 );
@@ -413,6 +456,36 @@ export default function HistoryPage() {
             </div>
           )}
         </div>
+
+        <footer className="shrink-0 border-t border-slate-100 bg-white p-3">
+          <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-bold text-slate-400">
+            <span>Toplam {totalRecords} kayıt</span>
+
+            <span>
+              Sayfa {currentPageNumber} / {totalPages}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handlePreviousPage}
+              disabled={!canGoPrevious}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600 transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Önceki
+            </button>
+
+            <button
+              type="button"
+              onClick={handleNextPage}
+              disabled={!canGoNext}
+              className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Sonraki
+            </button>
+          </div>
+        </footer>
       </section>
 
       {/* İşlem detay alanı */}
