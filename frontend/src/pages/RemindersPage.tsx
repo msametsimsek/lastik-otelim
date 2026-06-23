@@ -55,7 +55,7 @@ interface SeasonReminderRange {
 interface ReminderItem {
   id: string;
   customer: Customer;
-  vehicle?: Vehicle;
+  vehicle: Vehicle;
   record: TireRecord;
   message: string;
   daysUntilSeason: number;

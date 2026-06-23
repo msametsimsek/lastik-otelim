@@ -748,7 +748,9 @@ const handleDashboardSearchRedirect = (
             customers={customers}
             vehicles={vehicles}
             records={tireRecords}
-            onRefreshData={syncPoolData}
+            onRefreshData={async () => {
+              await syncPoolData();
+            }}
             onOpenDetail={(record) => setSelectedDetailRecord(record)}
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
             showToast={showToast}
@@ -760,7 +762,9 @@ const handleDashboardSearchRedirect = (
             vehicles={vehicles}
             customers={customers}
             records={tireRecords}
-            onRefreshData={syncPoolData}
+            onRefreshData={async () => {
+              await syncPoolData();
+            }}
             onOpenDetail={(record) => setSelectedDetailRecord(record)}
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
             showToast={showToast}
@@ -792,7 +796,9 @@ const handleDashboardSearchRedirect = (
           <SettingsPage
             onResetDatabase={handleResetDatabase}
             showToast={showToast}
-            onSaveSuccess={syncPoolData}
+            onSaveSuccess={async () => {
+              await syncPoolData();
+            }}
           />
         )}
       </AppLayout>

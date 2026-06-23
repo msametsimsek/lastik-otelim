@@ -104,6 +104,7 @@ export type ActiveTab =
   | "customers"
   | "vehicles"
   | "storage"
+  | "history"
   | "subscription"
   | "settings";
 

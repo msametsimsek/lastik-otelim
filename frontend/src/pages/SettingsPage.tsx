@@ -2,7 +2,8 @@ import {
   useCallback,
   useEffect,
   useState,
-  type FormEvent
+  type FormEvent,
+  type ReactNode
 } from "react";
 
 import {
@@ -434,7 +435,7 @@ function FormLabel({
   children,
   required = false
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   required?: boolean;
 }) {
   return (
@@ -453,7 +454,7 @@ function StatusItem({
   label,
   value
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   value: string;
 }) {
