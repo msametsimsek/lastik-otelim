@@ -288,7 +288,8 @@ export default function TireRecordDetailModal({
               uploadedFile.orginalName || uploadedFile.originalName || file.name,
             type: file.type,
             dataUrl: backendPreviewUrl || localPreviewUrl,
-            fileUrl: uploadedFile.fileUrl
+            fileUrl: uploadedFile.fileUrl,
+            source: "tire"
           });
 
           uploadedCount++;
@@ -358,11 +359,22 @@ export default function TireRecordDetailModal({
 
     const deletedIdSet = new Set(uniqueNumberList(deletedFileIds));
 
-    const imageIds = uniqueNumberList(
-      photos
+    const activePhotos = photos.filter((photo) => {
+      const fileId = getPhotoFileId(photo);
+      return fileId === null || !deletedIdSet.has(fileId);
+    });
+
+    const vehicleImageIds = uniqueNumberList(
+      activePhotos
+        .filter((photo) => photo.source === "vehicle")
         .map(getPhotoFileId)
         .filter((fileId): fileId is number => fileId !== null)
-        .filter((fileId) => !deletedIdSet.has(fileId))
+    );
+
+    const activeImageIds = uniqueNumberList(
+      activePhotos
+        .map(getPhotoFileId)
+        .filter((fileId): fileId is number => fileId !== null)
     );
 
     if (
@@ -423,7 +435,7 @@ export default function TireRecordDetailModal({
         id: Number(record.vehicleId),
         licensePlate: formattedPlate,
         note: trimmedVehicleNote,
-        imageIds
+        imageIds: vehicleImageIds
       });
 
       const updatedClient = await clientApi.updateClient({
@@ -445,7 +457,7 @@ export default function TireRecordDetailModal({
       let failedDeleteCount = 0;
 
       const fileIdsToDelete = uniqueNumberList(deletedFileIds).filter(
-        (fileId) => !imageIds.includes(fileId)
+        (fileId) => !activeImageIds.includes(fileId)
       );
 
       if (fileIdsToDelete.length > 0) {
@@ -475,12 +487,7 @@ export default function TireRecordDetailModal({
       const finalVehicleNote = updatedVehicle.note || trimmedVehicleNote;
       const finalPlate = updatedVehicle.licensePlate || formattedPlate;
 
-      const finalPhotos = uniquePhotosByFileId(
-        photos.filter((photo) => {
-          const fileId = getPhotoFileId(photo);
-          return fileId === null || !deletedIdSet.has(fileId);
-        })
-      );
+      const finalPhotos = uniquePhotosByFileId(activePhotos);
 
       const updatedCustomer: Customer = {
         id: String(updatedClient.id),

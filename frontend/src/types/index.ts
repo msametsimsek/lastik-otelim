@@ -16,6 +16,8 @@ export type Vehicle = {
   updatedAt?: string;
 };
 
+export type TirePhotoSource = "vehicle" | "tire";
+
 export type TirePhoto = {
   id: string;
   name: string;
@@ -23,6 +25,7 @@ export type TirePhoto = {
   dataUrl: string;
   fileId?: number;
   fileUrl?: string;
+  source?: TirePhotoSource;
 };
 
 export type TireType = "Yazlık" | "Kışlık" | "4 Mevsim";

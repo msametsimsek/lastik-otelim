@@ -149,6 +149,7 @@ export interface TireListItemDto {
   storageLocation: string | null;
   createdDate: string;
   createdUsername: string;
+  uploadFiles?: UploadFileDto[];
 }
 
 export interface TireClientPayload {
@@ -172,6 +173,7 @@ export interface CreateTirePayload {
   sizes: string;
   count: number;
   storageLocation: string;
+  imageIds: number[];
 }
 
 export interface UpdateTirePayload {
@@ -373,6 +375,10 @@ export const tireApi = {
     return request<PaginatedResponse<TireListItemDto>>(
       `/tire/Tire/GetList?${buildGetListQuery(params)}`
     );
+  },
+
+  getTireById(id: number) {
+    return request<TireListItemDto>(`/tire/Tire/GetById?Id=${id}`);
   },
 
   addTire(payload: CreateTirePayload) {

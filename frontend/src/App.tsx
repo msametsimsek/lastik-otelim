@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import AppLayout from "./components/layout/AppLayout";
 
@@ -31,7 +31,8 @@ import {
   ToastMessage,
   AuthUser,
   UserSubscription,
-  TireType
+  TireType,
+  TirePhoto
 } from "./types";
 
 import { getBusinessById, mapBusinessToSettings } from "./services/businessApi";
@@ -161,6 +162,121 @@ function getSafeFileId(file: Record<string, unknown>) {
   return 0;
 }
 
+type PhotoSource = "vehicle" | "tire";
+
+function getUploadFilesFromEntity(entity: unknown) {
+  if (!entity || typeof entity !== "object") return [];
+
+  const data = entity as {
+    uploadFiles?: unknown;
+    imageFiles?: unknown;
+    images?: unknown;
+    files?: unknown;
+  };
+
+  const candidates = [data.uploadFiles, data.imageFiles, data.images, data.files];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate as Record<string, unknown>[];
+    }
+  }
+
+  return [];
+}
+
+function mapUploadFilesToTirePhotos(
+  files: Record<string, unknown>[] | undefined,
+  source: PhotoSource
+): TirePhoto[] {
+  return (files || []).reduce<TirePhoto[]>((photos, file) => {
+    const fileId = getSafeFileId(file);
+    const fileUrl = getSafeFileUrl(file);
+    const fileName = getSafeFileName(file);
+    const publicUrl = buildFilePublicUrl(fileUrl);
+
+    if (!publicUrl && !fileUrl) {
+      return photos;
+    }
+
+    photos.push({
+      id: String(fileId || `${source}-${fileUrl || generateId()}`),
+      fileId: fileId || undefined,
+      name: fileName,
+      type: "image/*",
+      dataUrl: publicUrl || fileUrl,
+      fileUrl,
+      source
+    });
+
+    return photos;
+  }, []);
+}
+
+function getTirePhotoCacheKey(recordId: string) {
+  return `lastik-otelim:tire-photos:${recordId}`;
+}
+
+function getTirePhotoUniqueKey(photo: TirePhoto) {
+  if (photo.fileId) return `file-${photo.fileId}`;
+  if (photo.fileUrl) return `url-${photo.fileUrl}`;
+  if (photo.dataUrl) return `data-${photo.dataUrl}`;
+  return `id-${photo.id}`;
+}
+
+function mergeTirePhotos(...photoGroups: Array<TirePhoto[] | undefined>) {
+  const seen = new Set<string>();
+  const mergedPhotos: TirePhoto[] = [];
+
+  photoGroups.flatMap((photos) => photos || []).forEach((photo) => {
+    const uniqueKey = getTirePhotoUniqueKey(photo);
+
+    if (seen.has(uniqueKey)) return;
+
+    seen.add(uniqueKey);
+    mergedPhotos.push(photo);
+  });
+
+  return mergedPhotos;
+}
+
+function saveCachedTirePhotos(recordId: string, photos: TirePhoto[]) {
+  if (!recordId || photos.length === 0) return;
+
+  try {
+    const safePhotos = photos.map((photo) => ({
+      ...photo,
+      dataUrl: photo.fileUrl
+        ? buildFilePublicUrl(photo.fileUrl) || photo.dataUrl
+        : photo.dataUrl
+    }));
+
+    sessionStorage.setItem(
+      getTirePhotoCacheKey(recordId),
+      JSON.stringify(safePhotos)
+    );
+  } catch (error) {
+    console.warn("Lastik fotoğraf cache yazılamadı:", error);
+  }
+}
+
+function readCachedTirePhotos(recordId: string): TirePhoto[] {
+  if (!recordId) return [];
+
+  try {
+    const cachedValue = sessionStorage.getItem(getTirePhotoCacheKey(recordId));
+
+    if (!cachedValue) return [];
+
+    const parsedValue = JSON.parse(cachedValue);
+
+    return Array.isArray(parsedValue) ? (parsedValue as TirePhoto[]) : [];
+  } catch (error) {
+    console.warn("Lastik fotoğraf cache okunamadı:", error);
+    return [];
+  }
+}
+
 function mapApiTireToRecord(
   item: TireListItemDto,
   mappedCustomers: Customer[],
@@ -209,22 +325,17 @@ function mapApiTireToRecord(
       ? matchedApiVehicle.note.trim()
       : matchedVehicle?.note || "";
 
-  const photos =
-    matchedApiVehicle?.uploadFiles?.map((file) => {
-      const rawFile = file as Record<string, unknown>;
-      const fileId = getSafeFileId(rawFile);
-      const fileUrl = getSafeFileUrl(rawFile);
-      const fileName = getSafeFileName(rawFile);
+  const vehiclePhotos = mapUploadFilesToTirePhotos(
+    getUploadFilesFromEntity(matchedApiVehicle),
+    "vehicle"
+  );
 
-      return {
-        id: String(fileId || generateId()),
-        fileId: fileId || undefined,
-        name: fileName,
-        type: "image/*",
-        dataUrl: buildFilePublicUrl(fileUrl),
-        fileUrl
-      };
-    }) || [];
+  const tirePhotos = mapUploadFilesToTirePhotos(
+    getUploadFilesFromEntity(item),
+    "tire"
+  );
+
+  const photos = mergeTirePhotos(vehiclePhotos, tirePhotos);
 
   const tireCode = item.code || `LT-${item.id}`;
   const tireType = normalizeTireType(item.brandConstantName);
@@ -308,7 +419,12 @@ export default function App() {
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const showToast = (
+const dismissToast = useCallback((id: string) => {
+  setToasts((prev) => prev.filter((toast) => toast.id !== id));
+}, []);
+
+const showToast = useCallback(
+  (
     message: string,
     type: "success" | "error" | "info" | "warning" = "info"
   ) => {
@@ -320,14 +436,12 @@ export default function App() {
 
     setToasts((prev) => [...prev, freshToast]);
 
-    setTimeout(() => {
+    window.setTimeout(() => {
       dismissToast(freshToast.id);
     }, 3200);
-  };
-
-  const dismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
+  },
+  [dismissToast]
+);
 
   const syncBusinessSettings = async () => {
     try {
@@ -372,9 +486,21 @@ export default function App() {
 
       const mappedCustomers = apiClients.map(mapApiClientToCustomer);
       const mappedVehicles = apiVehicles.map(mapApiVehicleToVehicle);
-      const mappedRecords = apiTires.map((item) =>
-        mapApiTireToRecord(item, mappedCustomers, mappedVehicles, apiVehicles)
-      );
+      const mappedRecords = apiTires.map((item) => {
+        const record = mapApiTireToRecord(
+          item,
+          mappedCustomers,
+          mappedVehicles,
+          apiVehicles
+        );
+
+        const cachedPhotos = readCachedTirePhotos(record.id);
+
+        return {
+          ...record,
+          photos: mergeTirePhotos(record.photos, cachedPhotos)
+        };
+      });
 
       setCustomers(mappedCustomers);
       setVehicles(mappedVehicles);
@@ -571,17 +697,29 @@ const handleDashboardSearchRedirect = (
   setActiveTab(targetTab);
 };
 
-  const handleAddNewRecord = async (newRecord: TireRecord, autoPrint: boolean) => {
+  const handleAddNewRecord = async (
+    newRecord: TireRecord,
+    autoPrint: boolean
+  ) => {
+    const mergedNewRecord: TireRecord = {
+      ...newRecord,
+      photos: mergeTirePhotos(newRecord.photos)
+    };
+
+    saveCachedTirePhotos(mergedNewRecord.id, mergedNewRecord.photos || []);
+
     setTireRecords((currentRecords) => {
-      const exists = currentRecords.some((record) => record.id === newRecord.id);
+      const exists = currentRecords.some(
+        (record) => record.id === mergedNewRecord.id
+      );
 
       if (exists) {
         return currentRecords.map((record) =>
-          record.id === newRecord.id ? newRecord : record
+          record.id === mergedNewRecord.id ? mergedNewRecord : record
         );
       }
 
-      return [newRecord, ...currentRecords];
+      return [mergedNewRecord, ...currentRecords];
     });
 
     const freshRecords = await syncPoolData();
@@ -590,8 +728,21 @@ const handleDashboardSearchRedirect = (
     setIsAddModalOpen(false);
 
     if (autoPrint) {
-      const freshRecord =
-        freshRecords.find((record) => record.id === newRecord.id) || newRecord;
+      const freshRecordFromApi = freshRecords.find(
+        (record) => record.id === mergedNewRecord.id
+      );
+
+      const freshRecord: TireRecord = freshRecordFromApi
+        ? {
+            ...freshRecordFromApi,
+            photos: mergeTirePhotos(
+              freshRecordFromApi.photos,
+              mergedNewRecord.photos
+            )
+          }
+        : mergedNewRecord;
+
+      saveCachedTirePhotos(freshRecord.id, freshRecord.photos || []);
 
       setTimeout(() => {
         setSelectedPrintRecord(freshRecord);
@@ -599,22 +750,126 @@ const handleDashboardSearchRedirect = (
     }
   };
 
+  const handleOpenDetailRecord = async (record: TireRecord) => {
+    const cachedPhotos = readCachedTirePhotos(record.id);
+
+    const initialRecord: TireRecord = {
+      ...record,
+      photos: mergeTirePhotos(record.photos, cachedPhotos)
+    };
+
+    setSelectedDetailRecord(initialRecord);
+
+    const numericRecordId = Number(record.id);
+
+    if (!Number.isFinite(numericRecordId) || numericRecordId <= 0) {
+      return;
+    }
+
+    try {
+      const numericVehicleId = Number(record.vehicleId);
+
+      const [tireDetailResult, vehicleDetailResult] = await Promise.allSettled([
+        tireApi.getTireById(numericRecordId),
+        Number.isFinite(numericVehicleId) && numericVehicleId > 0
+          ? vehicleApi.getVehicleById(numericVehicleId)
+          : Promise.resolve(null)
+      ]);
+
+      if (tireDetailResult.status === "rejected") {
+        throw tireDetailResult.reason;
+      }
+
+      const detail = tireDetailResult.value;
+      const vehicleDetail =
+        vehicleDetailResult.status === "fulfilled" && vehicleDetailResult.value
+          ? vehicleDetailResult.value
+          : undefined;
+
+      const mappedDetailRecord = mapApiTireToRecord(
+        detail,
+        customers,
+        vehicles,
+        vehicleDetail ? [vehicleDetail] : []
+      );
+
+      const finalPhotos = mergeTirePhotos(
+        mappedDetailRecord.photos,
+        initialRecord.photos,
+        cachedPhotos
+      );
+
+      if (finalPhotos.length > 0) {
+        saveCachedTirePhotos(record.id, finalPhotos);
+      }
+
+      setSelectedDetailRecord({
+        ...initialRecord,
+        ...mappedDetailRecord,
+        vehicleNote: mappedDetailRecord.vehicleNote || initialRecord.vehicleNote,
+        photos: finalPhotos,
+        snapshot: {
+          ...initialRecord.snapshot,
+          ...mappedDetailRecord.snapshot,
+          vehicleNote:
+            mappedDetailRecord.snapshot?.vehicleNote ||
+            initialRecord.snapshot.vehicleNote
+        }
+      });
+    } catch (error) {
+      console.error(error);
+
+      setSelectedDetailRecord(initialRecord);
+
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Lastik detay fotoğrafları yüklenemedi.",
+        "warning"
+      );
+    }
+  };
+
   const handleUpdateRecord = async (
     updatedRecord: TireRecord,
     autoPrint: boolean
   ) => {
+    const cachedPhotos = readCachedTirePhotos(updatedRecord.id);
+
+    const mergedUpdatedRecord: TireRecord = {
+      ...updatedRecord,
+      photos: mergeTirePhotos(updatedRecord.photos, cachedPhotos)
+    };
+
+    saveCachedTirePhotos(
+      mergedUpdatedRecord.id,
+      mergedUpdatedRecord.photos || []
+    );
+
     setTireRecords((currentRecords) =>
       currentRecords.map((record) =>
-        record.id === updatedRecord.id ? updatedRecord : record
+        record.id === mergedUpdatedRecord.id ? mergedUpdatedRecord : record
       )
     );
 
     const freshRecords = await syncPoolData();
     setHistoryRefreshKey((currentKey) => currentKey + 1);
 
-    const freshRecord =
-      freshRecords.find((record) => record.id === updatedRecord.id) ||
-      updatedRecord;
+    const freshRecordFromApi = freshRecords.find(
+      (record) => record.id === mergedUpdatedRecord.id
+    );
+
+    const freshRecord: TireRecord = freshRecordFromApi
+      ? {
+          ...freshRecordFromApi,
+          photos: mergeTirePhotos(
+            freshRecordFromApi.photos,
+            mergedUpdatedRecord.photos
+          )
+        }
+      : mergedUpdatedRecord;
+
+    saveCachedTirePhotos(freshRecord.id, freshRecord.photos || []);
 
     setSelectedDetailRecord(freshRecord);
 
@@ -728,7 +983,7 @@ const handleDashboardSearchRedirect = (
             historyRefreshKey={historyRefreshKey}
             onAddTireClick={() => setIsAddModalOpen(true)}
             onSearchRedirect={handleDashboardSearchRedirect}
-            onOpenDetail={(record) => setSelectedDetailRecord(record)}
+            onOpenDetail={handleOpenDetailRecord}
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
           />
         )}
@@ -751,7 +1006,7 @@ const handleDashboardSearchRedirect = (
             onRefreshData={async () => {
               await syncPoolData();
             }}
-            onOpenDetail={(record) => setSelectedDetailRecord(record)}
+            onOpenDetail={handleOpenDetailRecord}
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
             showToast={showToast}
           />
@@ -765,7 +1020,7 @@ const handleDashboardSearchRedirect = (
             onRefreshData={async () => {
               await syncPoolData();
             }}
-            onOpenDetail={(record) => setSelectedDetailRecord(record)}
+            onOpenDetail={handleOpenDetailRecord}
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
             showToast={showToast}
           />
@@ -777,7 +1032,7 @@ const handleDashboardSearchRedirect = (
             customers={customers}
             vehicles={vehicles}
             initialSearchQuery={searchRedirectQuery}
-            onOpenDetail={(record) => setSelectedDetailRecord(record)}
+            onOpenDetail={handleOpenDetailRecord}
             onOpenLabelPrinter={(record) => setSelectedPrintRecord(record)}
           />
         )}

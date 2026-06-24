@@ -76,6 +76,15 @@ function normalizePlate(value: string) {
   return value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 }
 
+function isSupportedImageFile(file: File) {
+  const fileType = (file.type || "").toLowerCase();
+  const fileName = (file.name || "").toLowerCase();
+
+  if (fileType.startsWith("image/")) return true;
+
+  return /\.(jpg|jpeg|png|webp|heic|heif)$/i.test(fileName);
+}
+
 function normalizeTireType(value: string | null | undefined): TireType {
   const normalizedValue = normalizeTurkish(value || "");
 
@@ -148,6 +157,23 @@ function findExactVehicleMatch(vehicles: VehicleListItemDto[], plate: string) {
   );
 }
 
+function uniqueNumberList(values: Array<number | undefined>) {
+  return Array.from(
+    new Set(
+      values.filter(
+        (value): value is number =>
+          typeof value === "number" && Number.isFinite(value) && value > 0,
+      ),
+    ),
+  );
+}
+
+function getVehicleUploadFileIds(vehicle?: VehicleListItemDto | null) {
+  return uniqueNumberList(
+    (vehicle?.uploadFiles || []).map((file) => Number(file.fileId || file.id)),
+  );
+}
+
 export default function TireRecordModal({
   onClose,
   onSave,
@@ -179,6 +205,11 @@ export default function TireRecordModal({
 
   const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
   const pendingPhotosRef = useRef<PendingPhoto[]>([]);
+
+  const [vehiclePendingPhotos, setVehiclePendingPhotos] = useState<
+    PendingPhoto[]
+  >([]);
+  const vehiclePendingPhotosRef = useRef<PendingPhoto[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchingClient, setIsSearchingClient] = useState(false);
@@ -261,15 +292,16 @@ export default function TireRecordModal({
     () =>
       Boolean(
         fullName.trim() ||
-        phone.trim() ||
-        plate.trim() ||
-        vehicleNote.trim() ||
-        brand.trim() ||
-        size.trim() ||
-        location.trim() ||
-        pendingPhotos.length > 0 ||
-        quantity !== 4 ||
-        tireType !== "Yazlık",
+          phone.trim() ||
+          plate.trim() ||
+          vehicleNote.trim() ||
+          brand.trim() ||
+          size.trim() ||
+          location.trim() ||
+          pendingPhotos.length > 0 ||
+          vehiclePendingPhotos.length > 0 ||
+          quantity !== 4 ||
+          tireType !== "Yazlık",
       ),
     [
       brand,
@@ -282,6 +314,7 @@ export default function TireRecordModal({
       size,
       tireType,
       vehicleNote,
+      vehiclePendingPhotos.length,
     ],
   );
 
@@ -290,52 +323,66 @@ export default function TireRecordModal({
   }, [pendingPhotos]);
 
   useEffect(() => {
+    vehiclePendingPhotosRef.current = vehiclePendingPhotos;
+  }, [vehiclePendingPhotos]);
+
+  useEffect(() => {
     return () => {
       pendingPhotosRef.current.forEach((photo) => {
+        URL.revokeObjectURL(photo.previewUrl);
+      });
+
+      vehiclePendingPhotosRef.current.forEach((photo) => {
         URL.revokeObjectURL(photo.previewUrl);
       });
     };
   }, []);
 
-  useEffect(() => {
-    let isMounted = true;
+const showToastRef = useRef(showToast);
 
-    async function loadConstants() {
-      try {
-        setIsLoading(true);
+useEffect(() => {
+  showToastRef.current = showToast;
+}, [showToast]);
 
-        const constantResponse = await constantApi.getConstants({
-          page: 0,
-          pageSize: 1000,
-        });
+useEffect(() => {
+  let isMounted = true;
 
-        if (!isMounted) return;
+  async function loadConstants() {
+    try {
+      setIsLoading(true);
 
-        setConstants(constantResponse.items || []);
-      } catch (error) {
-        console.error(error);
+      const constantResponse = await constantApi.getConstants({
+        page: 0,
+        pageSize: 1000,
+      });
 
-        if (!isMounted) return;
+      if (!isMounted) return;
 
-        showToast(
-          error instanceof Error
-            ? error.message
-            : "Marka ve mevsim bilgileri API üzerinden yüklenemedi.",
-          "error",
-        );
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+      setConstants(constantResponse.items || []);
+    } catch (error) {
+      console.error(error);
+
+      if (!isMounted) return;
+
+      showToastRef.current(
+        error instanceof Error
+          ? error.message
+          : "Marka ve mevsim bilgileri API üzerinden yüklenemedi.",
+        "error",
+      );
+    } finally {
+      if (isMounted) {
+        setIsLoading(false);
       }
     }
+  }
 
-    loadConstants();
+  loadConstants();
 
-    return () => {
-      isMounted = false;
-    };
-  }, [showToast]);
+  return () => {
+    isMounted = false;
+  };
+}, []);
 
   useEffect(() => {
     const searchKey = `${fullName} ${phone}`.trim();
@@ -441,6 +488,10 @@ export default function TireRecordModal({
     setPlate("");
     setVehicleNote("");
     setVehicleSearchResults([]);
+    setVehiclePendingPhotos((currentPhotos) => {
+      currentPhotos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
+      return [];
+    });
   };
 
   const clearSelectedClient = () => {
@@ -449,6 +500,10 @@ export default function TireRecordModal({
     setPlate("");
     setVehicleNote("");
     setVehicleSearchResults([]);
+    setVehiclePendingPhotos((currentPhotos) => {
+      currentPhotos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
+      return [];
+    });
   };
 
   const handleSelectVehicle = (vehicle: VehicleListItemDto) => {
@@ -462,14 +517,16 @@ export default function TireRecordModal({
     setSelectedVehicleId("");
   };
 
-  const handleAddPhotos = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
+  const createPendingPhotosFromFiles = (files: FileList | null) => {
     const nextPhotos: PendingPhoto[] = [];
     let rejectedCount = 0;
 
+    if (!files || files.length === 0) {
+      return { nextPhotos, rejectedCount };
+    }
+
     Array.from(files).forEach((file) => {
-      if (!file.type.startsWith("image/")) {
+      if (!isSupportedImageFile(file)) {
         rejectedCount += 1;
         return;
       }
@@ -478,17 +535,19 @@ export default function TireRecordModal({
         id: generateId(),
         file,
         previewUrl: URL.createObjectURL(file),
-        name: file.name,
-        type: file.type,
+        name: file.name || `foto-${Date.now()}`,
+        type: file.type || "image/*",
       });
     });
 
+    return { nextPhotos, rejectedCount };
+  };
+
+  const handleAddPhotos = (files: FileList | null) => {
+    const { nextPhotos, rejectedCount } = createPendingPhotosFromFiles(files);
+
     if (nextPhotos.length > 0) {
       setPendingPhotos((currentPhotos) => [...currentPhotos, ...nextPhotos]);
-      showToast(
-        `${nextPhotos.length} fotoğraf hazırlandı. Kayıt tamamlanana kadar sunucuya gönderilmeyecek.`,
-        "info",
-      );
     }
 
     if (rejectedCount > 0) {
@@ -498,6 +557,38 @@ export default function TireRecordModal({
 
   const handleRemovePhoto = (photoId: string) => {
     setPendingPhotos((currentPhotos) => {
+      const photoToRemove = currentPhotos.find((photo) => photo.id === photoId);
+
+      if (photoToRemove) {
+        URL.revokeObjectURL(photoToRemove.previewUrl);
+      }
+
+      return currentPhotos.filter((photo) => photo.id !== photoId);
+    });
+  };
+
+  const handleAddVehiclePhotos = (files: FileList | null) => {
+    const { nextPhotos, rejectedCount } = createPendingPhotosFromFiles(files);
+
+    if (nextPhotos.length > 0) {
+      setVehiclePendingPhotos((currentPhotos) => [
+        ...currentPhotos,
+        ...nextPhotos,
+      ]);
+
+      showToast(
+        `${nextPhotos.length} araç görseli hazırlandı. Kayıt tamamlanana kadar sunucuya gönderilmeyecek.`,
+        "info",
+      );
+    }
+
+    if (rejectedCount > 0) {
+      showToast("Lütfen sadece görsel dosyası seçin.", "warning");
+    }
+  };
+
+  const handleRemoveVehiclePhoto = (photoId: string) => {
+    setVehiclePendingPhotos((currentPhotos) => {
       const photoToRemove = currentPhotos.find((photo) => photo.id === photoId);
 
       if (photoToRemove) {
@@ -656,50 +747,63 @@ export default function TireRecordModal({
     setCurrentStep((currentStep - 1) as WizardStep);
   };
 
-  const uploadPendingPhotos = async (): Promise<TirePhoto[]> => {
-    if (pendingPhotos.length === 0) return [];
-
-    setIsUploading(true);
-    setUploadProgress({ current: 0, total: pendingPhotos.length });
+  const uploadPhotos = async (
+    photos: PendingPhoto[],
+    source: "vehicle" | "tire",
+    offset = 0,
+    total = photos.length,
+  ): Promise<TirePhoto[]> => {
+    if (photos.length === 0) return [];
 
     const uploadedPhotos: TirePhoto[] = [];
 
-    try {
-      for (let index = 0; index < pendingPhotos.length; index += 1) {
-        const pendingPhoto = pendingPhotos[index];
-        const uploadedFile = await fileApi.uploadFile(pendingPhoto.file);
-        const uploadedFileId = Number(uploadedFile.id);
+    for (let index = 0; index < photos.length; index += 1) {
+      const pendingPhoto = photos[index];
+      const uploadedFile = await fileApi.uploadFile(pendingPhoto.file);
+      const uploadedFileId = Number(uploadedFile.id);
 
-        if (!Number.isFinite(uploadedFileId) || uploadedFileId <= 0) {
-          throw new Error(
-            `"${pendingPhoto.name}" fotoğrafı yüklendi ancak geçerli dosya kimliği alınamadı.`,
-          );
-        }
-
-        const previewUrl = pickImagePreviewUrl(uploadedFile);
-
-        uploadedPhotos.push({
-          id: String(uploadedFileId),
-          fileId: uploadedFileId,
-          name:
-            uploadedFile.orginalName ||
-            uploadedFile.originalName ||
-            pendingPhoto.name,
-          type: pendingPhoto.type,
-          dataUrl: previewUrl || pendingPhoto.previewUrl,
-          fileUrl: uploadedFile.fileUrl,
-        });
-
-        setUploadProgress({
-          current: index + 1,
-          total: pendingPhotos.length,
-        });
+      if (!Number.isFinite(uploadedFileId) || uploadedFileId <= 0) {
+        throw new Error(
+          `"${pendingPhoto.name}" fotoğrafı yüklendi ancak geçerli dosya kimliği alınamadı.`,
+        );
       }
 
-      return uploadedPhotos;
-    } finally {
-      setIsUploading(false);
+      const previewUrl = pickImagePreviewUrl(uploadedFile);
+
+      uploadedPhotos.push({
+        id: String(uploadedFileId),
+        fileId: uploadedFileId,
+        name:
+          uploadedFile.orginalName ||
+          uploadedFile.originalName ||
+          pendingPhoto.name,
+        type: pendingPhoto.type || "image/*",
+        dataUrl: previewUrl || pendingPhoto.previewUrl,
+        fileUrl: uploadedFile.fileUrl,
+        source,
+      });
+
+      setUploadProgress({
+        current: offset + index + 1,
+        total,
+      });
     }
+
+    return uploadedPhotos;
+  };
+
+  const uploadPendingPhotos = async (
+    offset = 0,
+    total = pendingPhotos.length,
+  ): Promise<TirePhoto[]> => {
+    return uploadPhotos(pendingPhotos, "tire", offset, total);
+  };
+
+  const uploadVehiclePendingPhotos = async (
+    offset = 0,
+    total = vehiclePendingPhotos.length,
+  ): Promise<TirePhoto[]> => {
+    return uploadPhotos(vehiclePendingPhotos, "vehicle", offset, total);
   };
 
   const handleSave = async (autoPrint: boolean) => {
@@ -759,10 +863,34 @@ export default function TireRecordModal({
     try {
       setIsSaving(true);
 
-      const uploadedPhotos = await uploadPendingPhotos();
-      const imageIds = uploadedPhotos
-        .map((photo) => photo.fileId)
-        .filter((id): id is number => typeof id === "number" && id > 0);
+      const totalUploadCount =
+        vehiclePendingPhotos.length + pendingPhotos.length;
+
+      if (totalUploadCount > 0) {
+        setIsUploading(true);
+        setUploadProgress({ current: 0, total: totalUploadCount });
+      }
+
+      const uploadedVehiclePhotos = await uploadVehiclePendingPhotos(
+        0,
+        totalUploadCount,
+      );
+
+      const existingVehicleImageIds = getVehicleUploadFileIds(effectiveVehicle);
+
+      const vehicleImageIds = uniqueNumberList([
+        ...existingVehicleImageIds,
+        ...uploadedVehiclePhotos.map((photo) => photo.fileId),
+      ]);
+
+      const uploadedPhotos = await uploadPendingPhotos(
+        vehiclePendingPhotos.length,
+        totalUploadCount,
+      );
+
+      const tireImageIds = uniqueNumberList(
+        uploadedPhotos.map((photo) => photo.fileId),
+      );
 
       const createdTire = await tireApi.addTire({
         client: effectiveClientId
@@ -782,13 +910,13 @@ export default function TireRecordModal({
               id: Number(effectiveVehicleId),
               licensePlate: null,
               note: null,
-              imageIds,
+              imageIds: vehicleImageIds,
             }
           : {
               id: null,
               licensePlate: formattedPlate,
               note: trimmedVehicleNote,
-              imageIds,
+              imageIds: vehicleImageIds,
             },
 
         modelConstantId,
@@ -796,6 +924,7 @@ export default function TireRecordModal({
         sizes: trimmedSize,
         count: Number(quantity),
         storageLocation: trimmedLocation,
+        imageIds: tireImageIds,
       });
 
       const finalVehicleId = String(
@@ -837,7 +966,7 @@ export default function TireRecordModal({
         quantity: finalQuantity,
         storageLocation: finalLocation,
         vehicleNote: effectiveVehicle?.note || trimmedVehicleNote,
-        photos: uploadedPhotos,
+        photos: [...uploadedVehiclePhotos, ...uploadedPhotos],
         createdAt: createdTire.createdDate || new Date().toISOString(),
         updatedAt: createdTire.createdDate || new Date().toISOString(),
         status: "active",
@@ -875,7 +1004,7 @@ export default function TireRecordModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/65 backdrop-blur-sm md:items-center md:p-4"
+      className="fixed inset-0 z-50 flex h-[100dvh] min-h-[100dvh] items-stretch justify-center overflow-hidden bg-slate-950/65 backdrop-blur-sm md:items-center md:p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           handleRequestClose();
@@ -883,10 +1012,10 @@ export default function TireRecordModal({
       }}
     >
       <div
-        className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl md:h-[min(90vh,820px)] md:max-w-5xl md:rounded-3xl md:border md:border-slate-200"
+        className="flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden bg-white shadow-2xl md:h-[min(90dvh,820px)] md:max-h-[min(90dvh,820px)] md:max-w-5xl md:rounded-3xl md:border md:border-slate-200"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+        <header className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600">
@@ -1264,6 +1393,103 @@ export default function TireRecordModal({
                         oluşturulacak.
                       </div>
                     )}
+
+                    <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mb-3 flex items-end justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Camera className="h-4 w-4 text-blue-600" />
+                            <h5 className="text-sm font-black text-slate-900">
+                              Araç Görselleri
+                            </h5>
+                          </div>
+                          <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                            Kaydet butonuna basılana kadar API'ye gönderilmez.
+                          </p>
+                        </div>
+
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500">
+                          {vehiclePendingPhotos.length} görsel
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white text-center transition hover:border-blue-500 hover:bg-blue-50">
+                          <input
+                            type="file"
+                            accept="image/*,.heic,.heif"
+                            capture="environment"
+                            onChange={(event) => {
+                              handleAddVehiclePhotos(event.target.files);
+                              event.currentTarget.value = "";
+                            }}
+                            disabled={isBusy}
+                            className="hidden"
+                          />
+
+                          <Camera className="h-5 w-5 text-blue-600" />
+                          <span className="mt-2 text-xs font-black text-slate-700">
+                            Kamera
+                          </span>
+                          <span className="mt-0.5 text-[9px] font-semibold text-slate-400">
+                            Tek çekim
+                          </span>
+                        </label>
+
+                        <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white text-center transition hover:border-blue-500 hover:bg-blue-50">
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*,.heic,.heif"
+                            onChange={(event) => {
+                              handleAddVehiclePhotos(event.target.files);
+                              event.currentTarget.value = "";
+                            }}
+                            disabled={isBusy}
+                            className="hidden"
+                          />
+
+                          <Upload className="h-5 w-5 text-blue-600" />
+                          <span className="mt-2 text-xs font-black text-slate-700">
+                            Galeri
+                          </span>
+                          <span className="mt-0.5 text-[9px] font-semibold text-slate-400">
+                            Çoklu seçim
+                          </span>
+                        </label>
+
+                        {vehiclePendingPhotos.map((photo) => (
+                          <div
+                            key={photo.id}
+                            className="group relative aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-100"
+                          >
+                            <img
+                              src={photo.previewUrl}
+                              alt={photo.name}
+                              className="h-full w-full object-cover"
+                            />
+
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-6">
+                              <p className="truncate text-[9px] font-bold text-white">
+                                {photo.name}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRemoveVehiclePhoto(photo.id)
+                              }
+                              disabled={isBusy}
+                              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-xl bg-black/65 text-white opacity-100 transition hover:bg-rose-600 sm:opacity-0 sm:group-hover:opacity-100 disabled:opacity-40"
+                              aria-label={`${photo.name} araç görselini sil`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1281,51 +1507,10 @@ export default function TireRecordModal({
                 }}
               >
                 <div className="mx-auto max-w-3xl">
-                  <div className="mb-5">
-                    <h4 className="text-xl font-black text-slate-950">
-                      Lastik bilgilerini tamamlayın
+                  <div className="mb-3">
+                    <h4 className="text-lg font-black text-slate-950">
+                      Lastik bilgileri
                     </h4>
-                    <p className="mt-1 text-sm font-semibold text-slate-500">
-                      Fotoğraflar bu aşamada yalnızca cihazınızda bekletilir.
-                    </p>
-                  </div>
-
-                  <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => setCurrentStep(0)}
-                      disabled={isBusy}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
-                    >
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                        Müşteri
-                      </span>
-                      <span className="mt-1 block truncate text-sm font-black text-slate-800">
-                        {effectiveClient?.name || fullName}
-                      </span>
-                      <span className="mt-0.5 block font-mono text-xs font-bold text-slate-400">
-                        {effectiveClient?.phone || phone}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setCurrentStep(1)}
-                      disabled={isBusy}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
-                    >
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                        Araç
-                      </span>
-                      <span className="mt-1 block font-mono text-sm font-black tracking-wider text-slate-800">
-                        {effectiveVehicle?.licensePlate || formatPlate(plate)}
-                      </span>
-                      <span className="mt-0.5 block truncate text-xs font-bold text-slate-400">
-                        {effectiveVehicle?.note ||
-                          vehicleNote ||
-                          "Not bulunmuyor"}
-                      </span>
-                    </button>
                   </div>
 
                   <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
@@ -1446,9 +1631,30 @@ export default function TireRecordModal({
                         <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 text-center transition hover:border-blue-500 hover:bg-blue-50">
                           <input
                             type="file"
-                            multiple
-                            accept="image/*"
+                            accept="image/*,.heic,.heif"
                             capture="environment"
+                            onChange={(event) => {
+                              handleAddPhotos(event.target.files);
+                              event.currentTarget.value = "";
+                            }}
+                            disabled={isBusy}
+                            className="hidden"
+                          />
+
+                          <Camera className="h-5 w-5 text-blue-600" />
+                          <span className="mt-2 text-xs font-black text-slate-700">
+                            Kamera
+                          </span>
+                          <span className="mt-0.5 text-[9px] font-semibold text-slate-400">
+                            Tek çekim
+                          </span>
+                        </label>
+
+                        <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 text-center transition hover:border-blue-500 hover:bg-blue-50">
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*,.heic,.heif"
                             onChange={(event) => {
                               handleAddPhotos(event.target.files);
                               event.currentTarget.value = "";
@@ -1459,10 +1665,10 @@ export default function TireRecordModal({
 
                           <Upload className="h-5 w-5 text-blue-600" />
                           <span className="mt-2 text-xs font-black text-slate-700">
-                            Fotoğraf Ekle
+                            Galeri
                           </span>
                           <span className="mt-0.5 text-[9px] font-semibold text-slate-400">
-                            Cihazda bekletilir
+                            Çoklu seçim
                           </span>
                         </label>
 
@@ -1503,9 +1709,13 @@ export default function TireRecordModal({
           )}
         </main>
 
-        <footer className="border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
-          {isUploading && (
-            <div className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
+        <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
+          <div
+            className={`overflow-hidden transition-all duration-300 ${
+              isUploading ? "mb-3 max-h-24 opacity-100" : "mb-0 max-h-0 opacity-0"
+            }`}
+          >
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
               <div className="flex items-center justify-between gap-3 text-xs font-black text-blue-700">
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1529,7 +1739,7 @@ export default function TireRecordModal({
                 />
               </div>
             </div>
-          )}
+          </div>
 
           <div className="flex items-center justify-between gap-3">
             <div>
