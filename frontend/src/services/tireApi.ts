@@ -10,6 +10,9 @@ const API_BASE_URL = RAW_API_BASE_URL.endsWith("/tire")
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
+export const DEFAULT_PAGE = 0;
+export const DEFAULT_PAGE_SIZE = 20;
+
 export interface PaginatedResponse<T> {
   items: T[];
   index: number;
@@ -25,14 +28,15 @@ export interface GetListParams {
   pageSize?: number;
   searchKey?: string;
 }
-export const DEFAULT_PAGE = 0;
-export const DEFAULT_PAGE_SIZE = 20;
+
+export interface VehicleListParams extends GetListParams {
+  clientId?: number;
+}
 
 export interface HistoryListParams extends GetListParams {
   count?: number;
   typeConstantValue?: string;
 }
-
 export interface HistoryListItemDto {
   id: number;
   clientName: string;
@@ -67,6 +71,8 @@ export interface UploadFileDto {
   fileId?: number;
   orginalName?: string;
   originalName?: string;
+  projectName?: string;
+  directoryName?: string;
   fileName?: string;
   filePath?: string;
   fileUrl?: string;
@@ -74,6 +80,7 @@ export interface UploadFileDto {
   fileSize?: number;
   fileExtension?: string;
   fileType?: string;
+  username?: string | null;
   uploadDate?: string;
   details?: UploadFileDetailDto[];
   [key: string]: unknown;
@@ -110,6 +117,7 @@ export interface VehicleListItemDto {
   createdDate: string;
   createdUsername: string;
   uploadFiles?: UploadFileDto[];
+  tires?: TireListItemDto[];
 }
 
 export interface CreateVehiclePayload {
@@ -191,6 +199,48 @@ export const searchPlaceholders = {
   tire: "Plaka, müşteri adı veya ebata göre ara..."
 };
 
+function toSafeNumber(value: unknown, fallback: number) {
+  const parsedValue = Number(value);
+
+  return Number.isFinite(parsedValue) ? parsedValue : fallback;
+}
+
+function normalizePaginatedResponse<T>(
+  data: Partial<PaginatedResponse<T>> | null | undefined,
+  params: GetListParams = {}
+): PaginatedResponse<T> {
+  const items = Array.isArray(data?.items) ? data.items : [];
+
+  const index = toSafeNumber(data?.index, params.page ?? DEFAULT_PAGE);
+  const size = toSafeNumber(
+    data?.size,
+    params.pageSize ?? DEFAULT_PAGE_SIZE
+  );
+
+  const count = toSafeNumber(data?.count, items.length);
+
+  const safeSize = size > 0 ? size : DEFAULT_PAGE_SIZE;
+  const pages = toSafeNumber(data?.pages, Math.ceil(count / safeSize));
+
+  const hasPrevious =
+    typeof data?.hasPrevious === "boolean" ? data.hasPrevious : index > 0;
+
+  const hasNext =
+    typeof data?.hasNext === "boolean"
+      ? data.hasNext
+      : pages > 0 && index + 1 < pages;
+
+  return {
+    items,
+    index,
+    size,
+    count,
+    pages,
+    hasPrevious,
+    hasNext
+  };
+}
+
 function getErrorMessage(data: unknown): string {
   if (typeof data === "string" && data.trim()) {
     return data.trim();
@@ -233,28 +283,45 @@ function getErrorMessage(data: unknown): string {
   return firstValidationError || "İşlem tamamlanamadı.";
 }
 
-function buildGetListQuery(params: GetListParams = {}): string {
+function buildIdQuery(id: number) {
+  const query = new URLSearchParams();
+  query.set("Id", String(id));
+
+  return query.toString();
+}
+
+function buildGetListQuery(params: GetListParams = {}) {
   const query = new URLSearchParams();
 
-  query.set("pageRequest.Page", String(params.page ?? DEFAULT_PAGE));
+  query.set("PageRequest.Page", String(params.page ?? DEFAULT_PAGE));
   query.set(
-    "pageRequest.PageSize",
+    "PageRequest.PageSize",
     String(params.pageSize ?? DEFAULT_PAGE_SIZE)
   );
 
   const searchKey = params.searchKey?.trim();
 
   if (searchKey) {
-    query.set("searchKey", searchKey);
+    query.set("SearchKey", searchKey);
   }
 
   return query.toString();
 }
 
-function buildHistoryListQuery(params: HistoryListParams = {}): string {
+function buildVehicleListQuery(params: VehicleListParams = {}) {
   const query = new URLSearchParams(buildGetListQuery(params));
 
-  if (typeof params.count === "number") {
+  if (typeof params.clientId === "number" && params.clientId > 0) {
+    query.set("ClientId", String(params.clientId));
+  }
+
+  return query.toString();
+}
+
+function buildHistoryListQuery(params: HistoryListParams = {}) {
+  const query = new URLSearchParams(buildGetListQuery(params));
+
+  if (typeof params.count === "number" && params.count > 0) {
     query.set("Count", String(params.count));
   }
 
@@ -265,6 +332,10 @@ function buildHistoryListQuery(params: HistoryListParams = {}): string {
   }
 
   return query.toString();
+}
+
+function buildEndpointWithQuery(endpoint: string, query: string) {
+  return query ? `${endpoint}?${query}` : endpoint;
 }
 
 async function parseResponseBody(response: Response): Promise<unknown> {
@@ -297,7 +368,11 @@ async function request<T>(
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint
+    : `/${endpoint}`;
+
+  const response = await fetch(`${API_BASE_URL}${normalizedEndpoint}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined
@@ -313,9 +388,17 @@ async function request<T>(
 }
 
 export const clientApi = {
-  getClients(params: GetListParams = {}) {
-    return request<PaginatedResponse<ClientListItemDto>>(
-      `/tire/Client/GetList?${buildGetListQuery(params)}`
+  async getClients(params: GetListParams = {}) {
+    const response = await request<Partial<PaginatedResponse<ClientListItemDto>>>(
+      buildEndpointWithQuery("/tire/Client/GetList", buildGetListQuery(params))
+    );
+
+    return normalizePaginatedResponse(response, params);
+  },
+
+  getClientById(id: number) {
+    return request<ClientListItemDto>(
+      buildEndpointWithQuery("/tire/Client/GetById", buildIdQuery(id))
     );
   },
 
@@ -329,14 +412,23 @@ export const clientApi = {
 };
 
 export const vehicleApi = {
-  getVehicles(params: GetListParams = {}) {
-    return request<PaginatedResponse<VehicleListItemDto>>(
-      `/tire/Vehicle/GetList?${buildGetListQuery(params)}`
+  async getVehicles(params: VehicleListParams = {}) {
+    const response = await request<
+      Partial<PaginatedResponse<VehicleListItemDto>>
+    >(
+      buildEndpointWithQuery(
+        "/tire/Vehicle/GetList",
+        buildVehicleListQuery(params)
+      )
     );
+
+    return normalizePaginatedResponse(response, params);
   },
 
   getVehicleById(id: number) {
-    return request<VehicleListItemDto>(`/tire/Vehicle/GetById?Id=${id}`);
+    return request<VehicleListItemDto>(
+      buildEndpointWithQuery("/tire/Vehicle/GetById", buildIdQuery(id))
+    );
   },
 
   addVehicle(payload: CreateVehiclePayload) {
@@ -349,15 +441,22 @@ export const vehicleApi = {
 };
 
 export const constantApi = {
-  getConstants(params: GetListParams = {}) {
-    return request<PaginatedResponse<ConstantListItemDto>>(
-      `/tire/Constant/GetList?${buildGetListQuery(params)}`
+  async getConstants(params: GetListParams = {}) {
+    const response = await request<
+      Partial<PaginatedResponse<ConstantListItemDto>>
+    >(
+      buildEndpointWithQuery(
+        "/tire/Constant/GetList",
+        buildGetListQuery(params)
+      )
     );
+
+    return normalizePaginatedResponse(response, params);
   }
 };
 
 export const tireApi = {
-  getTires(
+  async getTires(
     pageOrParams: number | GetListParams = DEFAULT_PAGE,
     pageSize = DEFAULT_PAGE_SIZE
   ) {
@@ -366,19 +465,25 @@ export const tireApi = {
         ? { page: pageOrParams, pageSize }
         : pageOrParams;
 
-    return request<PaginatedResponse<TireListItemDto>>(
-      `/tire/Tire/GetList?${buildGetListQuery(params)}`
+    const response = await request<Partial<PaginatedResponse<TireListItemDto>>>(
+      buildEndpointWithQuery("/tire/Tire/GetList", buildGetListQuery(params))
     );
+
+    return normalizePaginatedResponse(response, params);
   },
 
-  getList(params: GetListParams = {}) {
-    return request<PaginatedResponse<TireListItemDto>>(
-      `/tire/Tire/GetList?${buildGetListQuery(params)}`
+  async getList(params: GetListParams = {}) {
+    const response = await request<Partial<PaginatedResponse<TireListItemDto>>>(
+      buildEndpointWithQuery("/tire/Tire/GetList", buildGetListQuery(params))
     );
+
+    return normalizePaginatedResponse(response, params);
   },
 
   getTireById(id: number) {
-    return request<TireListItemDto>(`/tire/Tire/GetById?Id=${id}`);
+    return request<TireListItemDto>(
+      buildEndpointWithQuery("/tire/Tire/GetById", buildIdQuery(id))
+    );
   },
 
   addTire(payload: CreateTirePayload) {
@@ -395,13 +500,22 @@ export const tireApi = {
 };
 
 export const historyApi = {
-  getHistories(params: HistoryListParams = {}) {
-    return request<PaginatedResponse<HistoryListItemDto>>(
-      `/tire/History/GetList?${buildHistoryListQuery(params)}`
+  async getHistories(params: HistoryListParams = {}) {
+    const response = await request<
+      Partial<PaginatedResponse<HistoryListItemDto>>
+    >(
+      buildEndpointWithQuery(
+        "/tire/History/GetList",
+        buildHistoryListQuery(params)
+      )
     );
+
+    return normalizePaginatedResponse(response, params);
   },
 
   getHistoryById(id: number) {
-    return request<HistoryListItemDto>(`/tire/History/GetById?Id=${id}`);
+    return request<HistoryListItemDto>(
+      buildEndpointWithQuery("/tire/History/GetById", buildIdQuery(id))
+    );
   }
 };

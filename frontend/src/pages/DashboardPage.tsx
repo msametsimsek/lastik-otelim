@@ -1,9 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode
-} from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import {
   ArrowRight,
@@ -15,7 +10,6 @@ import {
   ClipboardList,
   Database,
   History,
-  Layers3,
   Plus,
   Printer,
   RefreshCw,
@@ -30,27 +24,33 @@ import type {
   Customer,
   SystemStats,
   TireRecord,
+  TireType,
   Vehicle
 } from "../types";
 
 import {
+  clientApi,
   historyApi,
-  type HistoryListItemDto
+  tireApi,
+  type HistoryListItemDto,
+  type TireListItemDto
 } from "../services/tireApi";
 
 interface DashboardPageProps {
-  stats: SystemStats;
-  recentRecords: {
+  /**
+   * Eski App.tsx prop'ları geçici olarak optional bırakıldı.
+   * Dashboard artık bu verileri kullanmıyor.
+   */
+  stats?: SystemStats;
+  recentRecords?: {
     record: TireRecord;
     customer: Customer | undefined;
     vehicle: Vehicle | undefined;
   }[];
-  historyRefreshKey: number;
+
+  historyRefreshKey?: number;
   onAddTireClick: () => void;
-  onSearchRedirect: (
-    tab: "storage" | "customers",
-    query: string
-  ) => void;
+  onSearchRedirect: (tab: "storage" | "customers", query: string) => void;
   onOpenDetail: (record: TireRecord) => void;
   onOpenLabelPrinter: (record: TireRecord) => void;
 }
@@ -88,66 +88,159 @@ function formatDateTime(value?: string) {
   });
 }
 
+function normalizeTireType(value?: string | null): TireType {
+  const normalizedValue = (value || "").toLocaleLowerCase("tr-TR");
+
+  if (normalizedValue.includes("kış") || normalizedValue.includes("kis")) {
+    return "Kışlık";
+  }
+
+  if (normalizedValue.includes("4") || normalizedValue.includes("mevsim")) {
+    return "4 Mevsim";
+  }
+
+  return "Yazlık";
+}
+
+function mapTireItemToRecord(item: TireListItemDto): TireRecord {
+  const tireType = normalizeTireType(item.brandConstantName);
+  const tireCode = item.code || `LT-${item.id}`;
+  const brand = item.modelConstantName || "Belirtilmedi";
+  const size = item.sizes || "Belirtilmedi";
+  const quantity = item.count || 0;
+  const storageLocation = item.storageLocation || "";
+
+  return {
+    id: String(item.id),
+    clientId: "",
+    vehicleId: String(item.vehicleId),
+    tireCode,
+    tireType,
+    brand,
+    size,
+    quantity,
+    storageLocation,
+    vehicleNote: "",
+    photos: [],
+    createdAt: item.createdDate,
+    updatedAt: item.createdDate,
+    status: "active",
+    snapshot: {
+      customerName: item.clientName || "Bilinmeyen Cari",
+      phone: "",
+      plate: item.vehicleLicensePlate || "-",
+      tireCode,
+      tireType,
+      brand,
+      size,
+      quantity,
+      storageLocation,
+      vehicleNote: ""
+    }
+  };
+}
+
 function getHistoryBadge(item: HistoryListItemDto) {
   switch (item.typeConstantValue?.toLowerCase()) {
     case "add":
       return {
         label: "Yeni Kayıt",
-        className:
-          "border-emerald-200 bg-emerald-50 text-emerald-700",
+        className: "border-emerald-200 bg-emerald-50 text-emerald-700",
         dotClassName: "bg-emerald-500"
       };
 
     case "delete":
       return {
         label: "Teslim",
-        className:
-          "border-rose-200 bg-rose-50 text-rose-700",
+        className: "border-rose-200 bg-rose-50 text-rose-700",
         dotClassName: "bg-rose-500"
       };
 
     default:
       return {
         label: "Güncelleme",
-        className:
-          "border-amber-200 bg-amber-50 text-amber-700",
+        className: "border-amber-200 bg-amber-50 text-amber-700",
         dotClassName: "bg-amber-500"
       };
   }
 }
 
 export default function DashboardPage({
-  stats,
-  recentRecords,
-  historyRefreshKey,
+  historyRefreshKey = 0,
   onAddTireClick,
   onSearchRedirect,
   onOpenDetail,
   onOpenLabelPrinter
 }: DashboardPageProps) {
-  const [historyItems, setHistoryItems] = useState<
-    HistoryListItemDto[]
-  >([]);
+  const [recentTires, setRecentTires] = useState<TireListItemDto[]>([]);
+  const [totalTireRecords, setTotalTireRecords] = useState(0);
+  const [totalCustomers, setTotalCustomers] = useState(0);
 
-  const [isHistoryLoading, setIsHistoryLoading] =
-    useState(true);
+  const [isOverviewLoading, setIsOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState("");
+  const [overviewReloadKey, setOverviewReloadKey] = useState(0);
 
-  const [historyError, setHistoryError] =
-    useState("");
+  const [historyItems, setHistoryItems] = useState<HistoryListItemDto[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const [historyReloadKey, setHistoryReloadKey] = useState(0);
 
-  const [historyReloadKey, setHistoryReloadKey] =
-    useState(0);
+  useEffect(() => {
+    let isMounted = true;
 
-  const storageRate = useMemo(() => {
-    if (!stats.totalRecords) return 0;
+    const loadOverview = async () => {
+      try {
+        setIsOverviewLoading(true);
+        setOverviewError("");
 
-    return Math.min(
-      100,
-      Math.round(
-        (stats.inStorage / stats.totalRecords) * 100
-      )
-    );
-  }, [stats.inStorage, stats.totalRecords]);
+        const [tireResponse, clientResponse] = await Promise.all([
+          tireApi.getTires({
+            page: 0,
+            pageSize: 8
+          }),
+          clientApi.getClients({
+            page: 0,
+            pageSize: 1
+          })
+        ]);
+
+        if (!isMounted) return;
+
+        const tireItems = tireResponse.items || [];
+
+        setRecentTires(tireItems);
+        setTotalTireRecords(tireResponse.count ?? tireItems.length);
+        setTotalCustomers(
+          clientResponse.count ?? (clientResponse.items || []).length
+        );
+      } catch (error) {
+        console.error("Dashboard verileri yüklenemedi:", error);
+
+        if (!isMounted) return;
+
+        setRecentTires([]);
+        setTotalTireRecords(0);
+        setTotalCustomers(0);
+
+        setOverviewError(
+          error instanceof Error
+            ? error.message
+            : "Dashboard verileri yüklenemedi."
+        );
+      } finally {
+        if (isMounted) {
+          setIsOverviewLoading(false);
+        }
+      }
+    };
+
+    void loadOverview();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [historyRefreshKey, overviewReloadKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -157,43 +250,27 @@ export default function DashboardPage({
         setIsHistoryLoading(true);
         setHistoryError("");
 
-        const response =
-          await historyApi.getHistories({
-            page: 0,
-            pageSize: 8
-          });
+        const response = await historyApi.getHistories({
+          page: 0,
+          pageSize: 8
+        });
 
         if (!isMounted) return;
 
-        const sortedItems = [
-          ...(response.items || [])
-        ]
-          .sort(
-            (first, second) =>
-              new Date(
-                second.createdDate
-              ).getTime() -
-              new Date(
-                first.createdDate
-              ).getTime()
-          )
-          .slice(0, 8);
+        const items = response.items || [];
 
-        setHistoryItems(sortedItems);
+        setHistoryItems(items);
+        setHistoryTotal(response.count ?? items.length);
       } catch (error) {
-        console.error(
-          "İşlem geçmişi yüklenemedi:",
-          error
-        );
+        console.error("İşlem geçmişi yüklenemedi:", error);
 
         if (!isMounted) return;
 
         setHistoryItems([]);
+        setHistoryTotal(0);
 
         setHistoryError(
-          error instanceof Error
-            ? error.message
-            : "İşlem geçmişi yüklenemedi."
+          error instanceof Error ? error.message : "İşlem geçmişi yüklenemedi."
         );
       } finally {
         if (isMounted) {
@@ -207,96 +284,94 @@ export default function DashboardPage({
     return () => {
       isMounted = false;
     };
-  }, [
-    historyRefreshKey,
-    historyReloadKey
-  ]);
+  }, [historyRefreshKey, historyReloadKey]);
+
+  const handleReloadAll = () => {
+    setOverviewReloadKey((currentKey) => currentKey + 1);
+    setHistoryReloadKey((currentKey) => currentKey + 1);
+  };
 
   return (
     <div className="app-page">
       <div className="app-page-scroll">
         <div className="mx-auto w-full max-w-[1680px] space-y-4 pb-4 animate-fade-up sm:space-y-5 sm:pb-6">
           <DashboardHero
-            totalRecords={stats.totalRecords}
-            inStorage={stats.inStorage}
-            storageRate={storageRate}
+            totalRecords={totalTireRecords}
+            loadedRecords={recentTires.length}
+            isLoading={isOverviewLoading}
+            errorMessage={overviewError}
+            onReload={handleReloadAll}
             onAddTireClick={onAddTireClick}
-            onOpenStorage={() =>
-              onSearchRedirect("storage", "")
-            }
-            onOpenCustomers={() =>
-              onSearchRedirect("customers", "")
-            }
+            onOpenStorage={() => onSearchRedirect("storage", "")}
+            onOpenCustomers={() => onSearchRedirect("customers", "")}
           />
 
           <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             <StatCard
-              icon={
-                <ClipboardList className="h-5 w-5" />
-              }
-              label="Aktif Emanet"
-              value={stats.totalRecords}
-              description="Sistemdeki aktif kayıtlar"
+              icon={<ClipboardList className="h-5 w-5" />}
+              label="Toplam Depo Kaydı"
+              value={isOverviewLoading ? "-" : totalTireRecords}
+              description="Tire/GetList count değeri"
               accentClass="from-blue-500 to-blue-700"
               iconClass="bg-blue-50 text-blue-600"
-              trendLabel="Canlı veri"
+              trendLabel="Backend"
             />
 
             <StatCard
-              icon={<Layers3 className="h-5 w-5" />}
-              label="Raf Girilen Kayıt"
-              value={stats.inStorage}
-              description="Konumu tanımlı lastikler"
+              icon={<Boxes className="h-5 w-5" />}
+              label="Son Liste Kaydı"
+              value={isOverviewLoading ? "-" : recentTires.length}
+              description="Tire/GetList items uzunluğu"
               accentClass="from-amber-400 to-orange-500"
               iconClass="bg-amber-50 text-amber-600"
-              trendLabel={`%${storageRate} oran`}
+              trendLabel="Sayfa"
             />
 
             <StatCard
               icon={<UsersRound className="h-5 w-5" />}
               label="Toplam Müşteri"
-              value={stats.totalCustomers}
-              description="Kayıtlı müşteri havuzu"
+              value={isOverviewLoading ? "-" : totalCustomers}
+              description="Client/GetList count değeri"
               accentClass="from-violet-500 to-purple-700"
               iconClass="bg-violet-50 text-violet-600"
-              trendLabel="Güncel"
+              trendLabel="Backend"
             />
 
             <StatCard
-              icon={
-                <CalendarDays className="h-5 w-5" />
-              }
-              label="Bu Ay Eklenen"
-              value={stats.addedThisMonth}
-              description="Aylık yeni kayıt adedi"
+              icon={<CalendarDays className="h-5 w-5" />}
+              label="İşlem Geçmişi"
+              value={isHistoryLoading ? "-" : historyTotal}
+              description="History/GetList count değeri"
               accentClass="from-emerald-500 to-teal-600"
               iconClass="bg-emerald-50 text-emerald-600"
-              trendLabel="Bu ay"
+              trendLabel="History"
             />
           </section>
 
+          {overviewError && (
+            <section className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+              Dashboard verileri alınamadı: {overviewError}
+            </section>
+          )}
+
           <section className="grid min-h-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
             <RecentRecordsModule
-              records={recentRecords}
-              onOpenDetail={onOpenDetail}
-              onOpenLabelPrinter={
-                onOpenLabelPrinter
+              records={recentTires}
+              isLoading={isOverviewLoading}
+              errorMessage={overviewError}
+              onReload={() => setOverviewReloadKey((currentKey) => currentKey + 1)}
+              onOpenDetail={(item) => onOpenDetail(mapTireItemToRecord(item))}
+              onOpenLabelPrinter={(item) =>
+                onOpenLabelPrinter(mapTireItemToRecord(item))
               }
-              onOpenStorage={() =>
-                onSearchRedirect("storage", "")
-              }
+              onOpenStorage={() => onSearchRedirect("storage", "")}
             />
 
             <HistoryModule
               items={historyItems}
               isLoading={isHistoryLoading}
               errorMessage={historyError}
-              onReload={() =>
-                setHistoryReloadKey(
-                  (currentKey) =>
-                    currentKey + 1
-                )
-              }
+              onReload={() => setHistoryReloadKey((currentKey) => currentKey + 1)}
             />
           </section>
         </div>
@@ -307,15 +382,19 @@ export default function DashboardPage({
 
 function DashboardHero({
   totalRecords,
-  inStorage,
-  storageRate,
+  loadedRecords,
+  isLoading,
+  errorMessage,
+  onReload,
   onAddTireClick,
   onOpenStorage,
   onOpenCustomers
 }: {
   totalRecords: number;
-  inStorage: number;
-  storageRate: number;
+  loadedRecords: number;
+  isLoading: boolean;
+  errorMessage: string;
+  onReload: () => void;
   onAddTireClick: () => void;
   onOpenStorage: () => void;
   onOpenCustomers: () => void;
@@ -341,8 +420,8 @@ function DashboardHero({
           </h1>
 
           <p className="mt-4 max-w-2xl text-[12px] font-medium leading-6 text-slate-400 sm:text-[13px]">
-            Yeni kayıt, depo konumu, müşteri ve işlem geçmişini
-            aynı operasyon ekranından takip edin.
+            Dashboard verileri artık App içindeki local havuzdan değil,
+            doğrudan backend GetList endpointlerinden okunur.
           </p>
 
           <div className="mt-6 flex flex-col gap-2.5 sm:flex-row">
@@ -379,38 +458,34 @@ function DashboardHero({
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
-                Depo Organizasyonu
+                Backend Durumu
               </p>
 
               <p className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">
-                %{storageRate}
+                {isLoading ? "..." : errorMessage ? "Hata" : "Canlı"}
               </p>
             </div>
 
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-400/20">
-              <CircleGauge className="h-5 w-5" />
-            </div>
+            <button
+              type="button"
+              onClick={onReload}
+              disabled={isLoading}
+              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-400/20 transition hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+              title="Dashboard verilerini yenile"
+              aria-label="Dashboard verilerini yenile"
+            >
+              {isLoading ? (
+                <RefreshCw className="h-5 w-5 animate-spin" />
+              ) : (
+                <CircleGauge className="h-5 w-5" />
+              )}
+            </button>
           </div>
 
-          <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.08]">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-blue-500 via-sky-400 to-indigo-400 transition-all duration-700"
-              style={{
-                width: `${storageRate}%`
-              }}
-            />
-          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <MiniMetric label="Backend Toplam" value={isLoading ? "-" : totalRecords} />
 
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <MiniMetric
-              label="Aktif Emanet"
-              value={totalRecords}
-            />
-
-            <MiniMetric
-              label="Raf Tanımlı"
-              value={inStorage}
-            />
+            <MiniMetric label="Listelenen" value={isLoading ? "-" : loadedRecords} />
           </div>
         </div>
       </div>
@@ -423,7 +498,7 @@ function MiniMetric({
   value
 }: {
   label: string;
-  value: number;
+  value: number | string;
 }) {
   return (
     <div className="rounded-2xl border border-white/[0.08] bg-black/10 px-3.5 py-3">
@@ -449,7 +524,7 @@ function StatCard({
 }: {
   icon: ReactNode;
   label: string;
-  value: number;
+  value: number | string;
   description: string;
   accentClass: string;
   iconClass: string;
@@ -457,14 +532,10 @@ function StatCard({
 }) {
   return (
     <article className="group relative min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] transition duration-300 hover:-translate-y-1 hover:border-blue-200/80 hover:shadow-[0_16px_36px_rgba(15,23,42,0.09)] sm:rounded-3xl sm:p-5">
-      <span
-        className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accentClass}`}
-      />
+      <span className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accentClass}`} />
 
       <div className="flex items-start justify-between gap-3">
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-2xl ${iconClass}`}
-        >
+        <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${iconClass}`}>
           {icon}
         </div>
 
@@ -493,19 +564,19 @@ function StatCard({
 
 function RecentRecordsModule({
   records,
+  isLoading,
+  errorMessage,
+  onReload,
   onOpenDetail,
   onOpenLabelPrinter,
   onOpenStorage
 }: {
-  records: {
-    record: TireRecord;
-    customer: Customer | undefined;
-    vehicle: Vehicle | undefined;
-  }[];
-  onOpenDetail: (record: TireRecord) => void;
-  onOpenLabelPrinter: (
-    record: TireRecord
-  ) => void;
+  records: TireListItemDto[];
+  isLoading: boolean;
+  errorMessage: string;
+  onReload: () => void;
+  onOpenDetail: (record: TireListItemDto) => void;
+  onOpenLabelPrinter: (record: TireListItemDto) => void;
   onOpenStorage: () => void;
 }) {
   return (
@@ -522,7 +593,7 @@ function RecentRecordsModule({
             </h2>
 
             <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
-              En son eklenen aktif lastik kayıtları
+              Tire/GetList üzerinden gelen son kayıtlar
             </p>
           </div>
         </div>
@@ -537,98 +608,88 @@ function RecentRecordsModule({
         </button>
       </header>
 
-      {records.length === 0 ? (
+      {isLoading ? (
+        <RecentRecordsSkeleton />
+      ) : errorMessage ? (
         <EmptyModule
-          icon={
-            <ClipboardList className="h-7 w-7" />
-          }
+          icon={<ClipboardList className="h-7 w-7" />}
+          title="Emanetler yüklenemedi"
+          description={errorMessage}
+          actionLabel="Tekrar Dene"
+          onAction={onReload}
+        />
+      ) : records.length === 0 ? (
+        <EmptyModule
+          icon={<ClipboardList className="h-7 w-7" />}
           title="Henüz emanet kaydı yok"
           description="Yeni lastik kayıtları burada görüntülenecek."
         />
       ) : (
         <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-          {records.map(
-            ({
-              record,
-              customer,
-              vehicle
-            }) => (
-              <article
-                key={record.id}
-                className="group flex flex-col gap-4 px-4 py-4 transition hover:bg-[#f8fbff] sm:flex-row sm:items-center sm:justify-between sm:px-5"
-              >
-                <div className="flex min-w-0 gap-3.5">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition group-hover:border-blue-100 group-hover:bg-blue-50 group-hover:text-blue-600">
-                    <Car className="h-4.5 w-4.5" />
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-[9px] font-black uppercase text-blue-700">
-                        {vehicle?.plate || "-"}
-                      </span>
-
-                      <span className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 font-mono text-[9px] font-black uppercase text-amber-700">
-                        {record.storageLocation ||
-                          "Rafsız"}
-                      </span>
-                    </div>
-
-                    <h3 className="mt-2 truncate text-[13px] font-black text-slate-950">
-                      {customer?.fullName ||
-                        "Bilinmeyen Cari"}
-                    </h3>
-
-                    <p className="mt-1 truncate text-[10px] font-semibold text-slate-500">
-                      {record.brand} •{" "}
-                      {record.size} •{" "}
-                      {record.quantity} adet
-                    </p>
-
-                    <p className="mt-1 truncate font-mono text-[9px] font-bold text-slate-400">
-                      {record.tireCode} •{" "}
-                      {formatDate(
-                        record.createdAt
-                      )}
-                    </p>
-                  </div>
+          {records.map((record) => (
+            <article
+              key={record.id}
+              className="group flex flex-col gap-4 px-4 py-4 transition hover:bg-[#f8fbff] sm:flex-row sm:items-center sm:justify-between sm:px-5"
+            >
+              <div className="flex min-w-0 gap-3.5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition group-hover:border-blue-100 group-hover:bg-blue-50 group-hover:text-blue-600">
+                  <Car className="h-4.5 w-4.5" />
                 </div>
 
-                <div className="flex shrink-0 gap-2 pl-[58px] sm:pl-0">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onOpenDetail(record)
-                    }
-                    className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[10px] font-black text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 sm:flex-none"
-                  >
-                    İncele
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-[9px] font-black uppercase text-blue-700">
+                      {record.vehicleLicensePlate || "-"}
+                    </span>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onOpenLabelPrinter(
-                        record
-                      )
-                    }
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm transition hover:bg-blue-600"
-                    title="Etiket yazdır"
-                    aria-label="Etiket yazdır"
-                  >
-                    <Printer className="h-3.5 w-3.5" />
-                  </button>
+                    <span className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 font-mono text-[9px] font-black uppercase text-amber-700">
+                      {record.storageLocation || "Rafsız"}
+                    </span>
+                  </div>
+
+                  <h3 className="mt-2 truncate text-[13px] font-black text-slate-950">
+                    {record.clientName || "Bilinmeyen Cari"}
+                  </h3>
+
+                  <p className="mt-1 truncate text-[10px] font-semibold text-slate-500">
+                    {record.modelConstantName || "-"} • {record.sizes || "-"} •{" "}
+                    {record.count || 0} adet
+                  </p>
+
+                  <p className="mt-1 truncate font-mono text-[9px] font-bold text-slate-400">
+                    {record.code || `#${record.id}`} • {formatDate(record.createdDate)}
+                  </p>
                 </div>
-              </article>
-            )
-          )}
+              </div>
+
+              <div className="flex shrink-0 gap-2 pl-[58px] sm:pl-0">
+                <button
+                  type="button"
+                  onClick={() => onOpenDetail(record)}
+                  className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[10px] font-black text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 sm:flex-none"
+                >
+                  İncele
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onOpenLabelPrinter(record)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm transition hover:bg-blue-600"
+                  title="Etiket yazdır"
+                  aria-label="Etiket yazdır"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </article>
+          ))}
         </div>
       )}
 
       <footer className="flex shrink-0 items-center justify-between border-t border-slate-100 bg-slate-50/60 px-4 py-3 sm:px-5">
         <p className="text-[9px] font-bold text-slate-400">
-          {records.length} son kayıt gösteriliyor
+          {records.length} kayıt gösteriliyor
         </p>
 
         <button
@@ -669,7 +730,7 @@ function HistoryModule({
             </h2>
 
             <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
-              Giriş, güncelleme ve teslim hareketleri
+              History/GetList üzerinden gelen hareketler
             </p>
           </div>
         </div>
@@ -682,13 +743,7 @@ function HistoryModule({
           title="İşlem geçmişini yenile"
           aria-label="İşlem geçmişini yenile"
         >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${
-              isLoading
-                ? "animate-spin"
-                : ""
-            }`}
-          />
+          <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
         </button>
       </header>
 
@@ -696,9 +751,7 @@ function HistoryModule({
         <HistorySkeleton />
       ) : errorMessage ? (
         <EmptyModule
-          icon={
-            <History className="h-7 w-7" />
-          }
+          icon={<History className="h-7 w-7" />}
           title="İşlemler yüklenemedi"
           description={errorMessage}
           actionLabel="Tekrar Dene"
@@ -706,9 +759,7 @@ function HistoryModule({
         />
       ) : items.length === 0 ? (
         <EmptyModule
-          icon={
-            <History className="h-7 w-7" />
-          }
+          icon={<History className="h-7 w-7" />}
           title="Henüz işlem kaydı yok"
           description="Sistem hareketleri burada görüntülenecek."
         />
@@ -718,14 +769,10 @@ function HistoryModule({
             <span className="absolute bottom-4 left-[7px] top-4 w-px bg-slate-200" />
 
             {items.map((item) => {
-              const badge =
-                getHistoryBadge(item);
+              const badge = getHistoryBadge(item);
 
               return (
-                <article
-                  key={item.id}
-                  className="group relative flex gap-4 py-3.5"
-                >
+                <article key={item.id} className="group relative flex gap-4 py-3.5">
                   <span
                     className={`relative z-10 mt-1.5 h-3.5 w-3.5 shrink-0 rounded-full border-[3px] border-white shadow-sm ${badge.dotClassName}`}
                   />
@@ -741,40 +788,32 @@ function HistoryModule({
                           </span>
 
                           <span className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-[9px] font-black uppercase text-slate-700">
-                            {item.licensePlate ||
-                              "-"}
+                            {item.licensePlate || "-"}
                           </span>
                         </div>
 
                         <h3 className="mt-2 truncate text-[12px] font-black text-slate-950">
-                          {item.clientName ||
-                            "Bilinmeyen Cari"}
+                          {item.clientName || "Bilinmeyen Cari"}
                         </h3>
                       </div>
 
                       <p className="shrink-0 text-[9px] font-bold text-slate-400">
-                        {formatDateTime(
-                          item.createdDate
-                        )}
+                        {formatDateTime(item.createdDate)}
                       </p>
                     </div>
 
                     <p className="mt-1 truncate text-[10px] font-semibold text-slate-500">
-                      {item.model || "-"} •{" "}
-                      {item.sizes || "-"} •{" "}
+                      {item.model || "-"} • {item.sizes || "-"} •{" "}
                       {item.count || 0} adet
                     </p>
 
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                       <p className="truncate font-mono text-[9px] font-bold text-slate-400">
-                        {item.code || "-"} •{" "}
-                        {item.createdUsername ||
-                          "-"}
+                        {item.code || "-"} • {item.createdUsername || "-"}
                       </p>
 
                       <span className="rounded-lg bg-amber-50 px-2 py-1 font-mono text-[8px] font-black uppercase text-amber-700">
-                        {item.storageLocation ||
-                          "Raf belirtilmedi"}
+                        {item.storageLocation || "Raf belirtilmedi"}
                       </span>
                     </div>
                   </div>
@@ -792,10 +831,31 @@ function HistoryModule({
 
         <span className="inline-flex items-center gap-1.5 text-[9px] font-black text-emerald-600">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Canlı geçmiş
+          Backend geçmiş
         </span>
       </footer>
     </section>
+  );
+}
+
+function RecentRecordsSkeleton() {
+  return (
+    <div className="min-h-0 flex-1 space-y-3 overflow-hidden px-4 py-4 sm:px-5">
+      {Array.from({ length: 5 }).map((_, index) => (
+        <div
+          key={index}
+          className="flex gap-3 rounded-2xl border border-slate-100 p-3"
+        >
+          <div className="ui-skeleton h-11 w-11 shrink-0 rounded-2xl" />
+
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="ui-skeleton h-3 w-1/3 rounded-full" />
+            <div className="ui-skeleton h-3 w-2/3 rounded-full" />
+            <div className="ui-skeleton h-2.5 w-1/2 rounded-full" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

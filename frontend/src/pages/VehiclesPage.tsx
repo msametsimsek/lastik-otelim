@@ -8,32 +8,45 @@ import {
 
 import {
   ArrowLeft,
+  Calendar,
   Car,
+  FileText,
   Image as ImageIcon,
-  Phone,
   Plus,
-  Printer,
   RefreshCw,
   Search,
   User,
   X
 } from "lucide-react";
 
-import { Customer, TireRecord, Vehicle } from "../types";
+import type { Customer, TireRecord, Vehicle } from "../types";
+
+import { buildFilePublicUrl } from "../services/fileApi";
+
 import {
+  clientApi,
+  type ClientListItemDto,
   searchPlaceholders,
-  VehicleListItemDto,
-  vehicleApi
+  type TireListItemDto,
+  type UploadFileDto,
+  vehicleApi,
+  type VehicleListItemDto
 } from "../services/tireApi";
-import { formatPlate } from "../utils/helpers";
+
+import { formatDate, formatPlate } from "../utils/helpers";
 
 interface VehiclesPageProps {
-  vehicles: Vehicle[];
-  customers: Customer[];
-  records: TireRecord[];
-  onRefreshData: () => void | Promise<void>;
-  onOpenDetail: (record: TireRecord) => void;
-  onOpenLabelPrinter: (record: TireRecord) => void;
+  /**
+   * Eski App.tsx prop'ları geçici olarak optional bırakıldı.
+   * Bu sayfa artık bunları kullanmıyor.
+   */
+  vehicles?: Vehicle[];
+  customers?: Customer[];
+  records?: TireRecord[];
+  onRefreshData?: () => void | Promise<void>;
+  onOpenDetail?: (record: TireRecord) => void;
+  onOpenLabelPrinter?: (record: TireRecord) => void;
+
   showToast: (
     message: string,
     type: "success" | "error" | "info" | "warning"
@@ -41,6 +54,7 @@ interface VehiclesPageProps {
 }
 
 const VEHICLE_PAGE_SIZE = 20;
+const CUSTOMER_SELECT_PAGE_SIZE = 1000;
 
 type VehiclePaginationState = {
   index: number;
@@ -60,106 +74,135 @@ const EMPTY_VEHICLE_PAGINATION: VehiclePaginationState = {
   hasNext: false
 };
 
-function getStringValue(value: unknown, fallback = "") {
-  return typeof value === "string" ? value : fallback;
+function getVehiclePlate(vehicle: VehicleListItemDto | null) {
+  return vehicle?.licensePlate?.trim() || "-";
 }
 
-function getNumberValue(value: unknown, fallback = 0) {
-  return typeof value === "number" ? value : fallback;
+function getVehicleNote(vehicle: VehicleListItemDto | null) {
+  return vehicle?.note?.trim() || "Araç notu bulunmuyor";
 }
 
-function mapApiVehicleToVehicle(vehicle: VehicleListItemDto): Vehicle {
-  const rawVehicle = vehicle as VehicleListItemDto & Record<string, unknown>;
-
-  return {
-    id: String(rawVehicle.id ?? ""),
-    clientId: String(
-      rawVehicle.clientId ??
-        rawVehicle.clientID ??
-        rawVehicle.customerId ??
-        ""
-    ),
-    plate:
-      getStringValue(rawVehicle.licensePlate) ||
-      getStringValue(rawVehicle.plate) ||
-      "-",
-    note: getStringValue(rawVehicle.note),
-    createdAt:
-      getStringValue(rawVehicle.createdDate) ||
-      getStringValue(rawVehicle.createdAt) ||
-      new Date().toISOString()
-  } as Vehicle;
+function getClientName(vehicle: VehicleListItemDto | null) {
+  return vehicle?.clientName?.trim() || "Müşteri bilgisi yok";
 }
 
-function getVehicleCustomer(
-  vehicle: Vehicle,
-  customers: Customer[]
-): Customer | undefined {
-  return customers.find(
-    (customer) => customer.id === vehicle.clientId
+function getBestImageUrl(file: UploadFileDto) {
+  const details = Array.isArray(file.details) ? file.details : [];
+
+  const preferredDetail =
+    details.find((detail) => detail.imageSize === "medium") ||
+    details.find((detail) => detail.imageSize === "small") ||
+    details.find((detail) => detail.imageSize === "large") ||
+    details.find((detail) => detail.imageSize === "thumb") ||
+    details[0];
+
+  const rawUrl =
+    preferredDetail?.fileUrl ||
+    file.fileUrl ||
+    file.url ||
+    file.filePath ||
+    "";
+
+  return buildFilePublicUrl(rawUrl) || rawUrl;
+}
+
+function getFileName(file: UploadFileDto) {
+  return (
+    file.orginalName ||
+    file.originalName ||
+    file.fileName ||
+    "Araç görseli"
   );
 }
 
-function getVehicleRecords(
-  vehicleId: string,
-  records: TireRecord[]
-): TireRecord[] {
-  return records.filter(
-    (record) =>
-      record.vehicleId === vehicleId &&
-      record.status !== "delivered"
-  );
+function getTireTitle(tire: TireListItemDto) {
+  return `${tire.modelConstantName || "Marka belirtilmedi"} • ${
+    tire.sizes || "Ebat belirtilmedi"
+  }`;
 }
 
-export default function VehiclesPage({
-  vehicles,
-  customers,
-  records,
-  onRefreshData,
-  onOpenDetail,
-  onOpenLabelPrinter,
-  showToast
-}: VehiclesPageProps) {
-  const [pagedVehicles, setPagedVehicles] = useState<Vehicle[]>(() =>
-    vehicles.slice(0, VEHICLE_PAGE_SIZE)
-  );
+function getCustomerOptionText(customer: ClientListItemDto) {
+  const name = customer.name?.trim() || "İsimsiz Müşteri";
+  const phone = customer.phone?.trim();
 
-  const [selectedVehicleId, setSelectedVehicleId] = useState(
-    vehicles[0]?.id || ""
+  return phone ? `${name} — ${phone}` : name;
+}
+
+export default function VehiclesPage({ showToast }: VehiclesPageProps) {
+  const [vehicles, setVehicles] = useState<VehicleListItemDto[]>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(
+    null
   );
+  const [selectedVehicle, setSelectedVehicle] =
+    useState<VehicleListItemDto | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
-
   const [page, setPage] = useState(0);
 
-  const [pagination, setPagination] =
-    useState<VehiclePaginationState>({
-      ...EMPTY_VEHICLE_PAGINATION,
-      count: vehicles.length,
-      pages:
-        vehicles.length > 0
-          ? Math.ceil(vehicles.length / VEHICLE_PAGE_SIZE)
-          : 0,
-      hasNext: vehicles.length > VEHICLE_PAGE_SIZE
-    });
+  const [pagination, setPagination] = useState<VehiclePaginationState>(
+    EMPTY_VEHICLE_PAGINATION
+  );
 
   const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
 
   const [isLoadingVehicles, setIsLoadingVehicles] = useState(true);
+  const [isLoadingVehicleDetail, setIsLoadingVehicleDetail] = useState(false);
+
   const [vehicleErrorMessage, setVehicleErrorMessage] = useState("");
+  const [vehicleDetailErrorMessage, setVehicleDetailErrorMessage] =
+    useState("");
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [customerOptions, setCustomerOptions] = useState<ClientListItemDto[]>(
+    []
+  );
+  const [isLoadingCustomerOptions, setIsLoadingCustomerOptions] =
+    useState(false);
+
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [newPlate, setNewPlate] = useState("");
   const [newNote, setNewNote] = useState("");
   const [isCreatingVehicle, setIsCreatingVehicle] = useState(false);
 
+  const vehiclePhotos = useMemo(
+    () => selectedVehicle?.uploadFiles || [],
+    [selectedVehicle]
+  );
+
+  const vehicleTires = useMemo(
+    () => selectedVehicle?.tires || [],
+    [selectedVehicle]
+  );
+
+  const loadVehicleDetail = useCallback(async (vehicleId: number) => {
+    try {
+      setIsLoadingVehicleDetail(true);
+      setVehicleDetailErrorMessage("");
+
+      const detail = await vehicleApi.getVehicleById(vehicleId);
+
+      setSelectedVehicle(detail);
+    } catch (error) {
+      console.error("Araç detayı yüklenemedi:", error);
+
+      setSelectedVehicle(null);
+
+      setVehicleDetailErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Araç detayı yüklenirken beklenmeyen bir hata oluştu."
+      );
+    } finally {
+      setIsLoadingVehicleDetail(false);
+    }
+  }, []);
+
   const loadVehicles = useCallback(
     async (
-      targetPage = page,
+      targetPage = 0,
       options?: {
         search?: string;
-        preferredVehicleId?: string;
+        preferredVehicleId?: number;
       }
     ) => {
       const currentSearch = options?.search ?? searchQuery;
@@ -174,62 +217,46 @@ export default function VehiclesPage({
           searchKey: currentSearch
         });
 
-        const items = (response.items || []).map(mapApiVehicleToVehicle);
+        const items = response.items || [];
 
-        setPagedVehicles(items);
+        setVehicles(items);
 
         setPagination({
           index: response.index ?? targetPage,
           size: response.size ?? VEHICLE_PAGE_SIZE,
           count: response.count ?? items.length,
           pages: response.pages ?? (items.length > 0 ? 1 : 0),
-          hasPrevious:
-            response.hasPrevious ?? targetPage > 0,
+          hasPrevious: response.hasPrevious ?? targetPage > 0,
           hasNext: response.hasNext ?? false
         });
 
-        setSelectedVehicleId((currentId) => {
-          const preferredVehicleId = options?.preferredVehicleId;
+        const preferredVehicleId = options?.preferredVehicleId;
 
-          if (
-            preferredVehicleId &&
-            items.some((vehicle) => vehicle.id === preferredVehicleId)
-          ) {
-            return preferredVehicleId;
-          }
+        const nextSelectedVehicle =
+          (preferredVehicleId
+            ? items.find((vehicle) => vehicle.id === preferredVehicleId)
+            : undefined) ||
+          (selectedVehicleId
+            ? items.find((vehicle) => vehicle.id === selectedVehicleId)
+            : undefined) ||
+          items[0];
 
-          if (
-            currentId &&
-            items.some((vehicle) => vehicle.id === currentId)
-          ) {
-            return currentId;
-          }
-
-          return items[0]?.id || "";
-        });
-
-        if (items.length === 0) {
+        if (nextSelectedVehicle) {
+          setSelectedVehicleId(nextSelectedVehicle.id);
+          await loadVehicleDetail(nextSelectedVehicle.id);
+        } else {
+          setSelectedVehicleId(null);
+          setSelectedVehicle(null);
           setIsMobileDetailOpen(false);
         }
       } catch (error) {
         console.error("Araçlar yüklenemedi:", error);
 
-        const fallbackVehicles = vehicles.slice(0, VEHICLE_PAGE_SIZE);
-
-        setPagedVehicles(fallbackVehicles);
-
-        setPagination({
-          ...EMPTY_VEHICLE_PAGINATION,
-          count: vehicles.length,
-          pages:
-            vehicles.length > 0
-              ? Math.ceil(vehicles.length / VEHICLE_PAGE_SIZE)
-              : 0,
-          hasNext: vehicles.length > VEHICLE_PAGE_SIZE
-        });
-
-        setSelectedVehicleId(fallbackVehicles[0]?.id || "");
+        setVehicles([]);
+        setSelectedVehicleId(null);
+        setSelectedVehicle(null);
         setIsMobileDetailOpen(false);
+        setPagination(EMPTY_VEHICLE_PAGINATION);
 
         setVehicleErrorMessage(
           error instanceof Error
@@ -240,76 +267,55 @@ export default function VehiclesPage({
         setIsLoadingVehicles(false);
       }
     },
-    [vehicles, page, searchQuery]
+    [loadVehicleDetail, searchQuery, selectedVehicleId]
   );
+
+  const loadCustomerOptions = useCallback(async () => {
+    try {
+      setIsLoadingCustomerOptions(true);
+
+      const response = await clientApi.getClients({
+        page: 0,
+        pageSize: CUSTOMER_SELECT_PAGE_SIZE
+      });
+
+      setCustomerOptions(response.items || []);
+    } catch (error) {
+      console.error("Müşteri listesi yüklenemedi:", error);
+
+      setCustomerOptions([]);
+
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Müşteri listesi yüklenirken beklenmeyen bir hata oluştu.",
+        "error"
+      );
+    } finally {
+      setIsLoadingCustomerOptions(false);
+    }
+  }, [showToast]);
 
   useEffect(() => {
     loadVehicles(page);
   }, [loadVehicles, page]);
 
-  useEffect(() => {
-    const selectedVehicleExists = pagedVehicles.some(
-      (vehicle) => vehicle.id === selectedVehicleId
-    );
-
-    if (!selectedVehicleExists) {
-      const nextVehicleId = pagedVehicles[0]?.id || "";
-
-      setSelectedVehicleId(nextVehicleId);
-
-      if (!nextVehicleId) {
-        setIsMobileDetailOpen(false);
-      }
-    }
-  }, [pagedVehicles, selectedVehicleId]);
-
-  const selectedVehicle = pagedVehicles.find(
-    (vehicle) => vehicle.id === selectedVehicleId
-  );
-
-  const selectedCustomer = selectedVehicle
-    ? getVehicleCustomer(selectedVehicle, customers)
-    : undefined;
-
-  const selectedVehicleRecords = useMemo(
-    () =>
-      selectedVehicle
-        ? getVehicleRecords(selectedVehicle.id, records)
-        : [],
-    [selectedVehicle, records]
-  );
-
-  const selectedVehiclePhotos = useMemo(() => {
-    const seen = new Set<string>();
-
-    return selectedVehicleRecords
-      .flatMap((record) => record.photos || [])
-      .filter((photo) => {
-        const key = String(photo.fileId || photo.id);
-
-        if (!key || seen.has(key)) return false;
-
-        seen.add(key);
-        return true;
-      });
-  }, [selectedVehicleRecords]);
-
   const totalRecords = pagination.count;
   const totalPages = pagination.pages;
-  const currentPageNumber =
-    totalPages === 0 ? 0 : page + 1;
+  const currentPageNumber = totalPages === 0 ? 0 : page + 1;
 
   const canGoPrevious =
     !isLoadingVehicles && (pagination.hasPrevious || page > 0);
 
   const canGoNext =
     !isLoadingVehicles &&
-    (pagination.hasNext ||
-      (totalPages > 0 && page < totalPages - 1));
+    (pagination.hasNext || (totalPages > 0 && page < totalPages - 1));
 
-  const handleSelectVehicle = (vehicleId: string) => {
+  const handleSelectVehicle = async (vehicleId: number) => {
     setSelectedVehicleId(vehicleId);
     setIsMobileDetailOpen(true);
+
+    await loadVehicleDetail(vehicleId);
   };
 
   const handleSearchChange = (value: string) => {
@@ -330,6 +336,14 @@ export default function VehiclesPage({
 
     setPage((currentPage) => currentPage + 1);
     setIsMobileDetailOpen(false);
+  };
+
+  const handleOpenAddModal = () => {
+    setIsAddModalOpen(true);
+
+    if (customerOptions.length === 0) {
+      void loadCustomerOptions();
+    }
   };
 
   const resetAddVehicleForm = () => {
@@ -366,18 +380,15 @@ export default function VehiclesPage({
         imageIds: []
       });
 
-      await onRefreshData();
-
       setSearchQuery("");
       setPage(0);
 
       await loadVehicles(0, {
         search: "",
-        preferredVehicleId: String(createdVehicle.id)
+        preferredVehicleId: createdVehicle.id
       });
 
       setIsMobileDetailOpen(true);
-
       resetAddVehicleForm();
 
       showToast("Araç başarıyla eklendi.", "success");
@@ -397,7 +408,6 @@ export default function VehiclesPage({
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden text-slate-950 animate-slide-in lg:grid-cols-12 lg:gap-6">
-      {/* Araç listesi */}
       <section
         className={`h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm lg:col-span-4 lg:flex lg:rounded-3xl ${
           isMobileDetailOpen ? "hidden" : "flex"
@@ -405,9 +415,7 @@ export default function VehiclesPage({
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 p-4 sm:p-5">
           <div className="min-w-0">
-            <h2 className="text-sm font-black text-slate-900">
-              Araçlar
-            </h2>
+            <h2 className="text-sm font-black text-slate-900">Araçlar</h2>
 
             <p className="mt-1 text-[11px] font-medium text-slate-400">
               {totalRecords} kayıtlı araç
@@ -432,7 +440,7 @@ export default function VehiclesPage({
 
             <button
               type="button"
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={handleOpenAddModal}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-700 active:scale-[0.98] sm:px-4"
             >
               <Plus className="h-4 w-4" />
@@ -441,7 +449,6 @@ export default function VehiclesPage({
           </div>
         </header>
 
-        {/* Sabit arama alanı */}
         <div className="shrink-0 border-b border-slate-100 p-4">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -449,16 +456,13 @@ export default function VehiclesPage({
             <input
               type="text"
               value={searchQuery}
-              onChange={(event) =>
-                handleSearchChange(event.target.value)
-              }
+              onChange={(event) => handleSearchChange(event.target.value)}
               placeholder={searchPlaceholders.vehicle}
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-xs font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
             />
           </div>
         </div>
 
-        {/* Yalnızca araç listesi kayar */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
           {isLoadingVehicles ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
@@ -488,7 +492,7 @@ export default function VehiclesPage({
                 Tekrar Dene
               </button>
             </div>
-          ) : pagedVehicles.length === 0 ? (
+          ) : vehicles.length === 0 ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
               <Car className="h-7 w-7 text-slate-300" />
 
@@ -498,19 +502,8 @@ export default function VehiclesPage({
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {pagedVehicles.map((vehicle) => {
-                const customer = getVehicleCustomer(
-                  vehicle,
-                  customers
-                );
-
-                const vehicleRecords = getVehicleRecords(
-                  vehicle.id,
-                  records
-                );
-
-                const isSelected =
-                  selectedVehicleId === vehicle.id;
+              {vehicles.map((vehicle) => {
+                const isSelected = selectedVehicleId === vehicle.id;
 
                 return (
                   <button
@@ -518,9 +511,7 @@ export default function VehiclesPage({
                     type="button"
                     onClick={() => handleSelectVehicle(vehicle.id)}
                     className={`relative flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition sm:px-5 ${
-                      isSelected
-                        ? "bg-blue-50/80"
-                        : "hover:bg-slate-50"
+                      isSelected ? "bg-blue-50/80" : "hover:bg-slate-50"
                     }`}
                   >
                     {isSelected && (
@@ -529,26 +520,16 @@ export default function VehiclesPage({
 
                     <div className="min-w-0">
                       <h3 className="truncate font-mono text-sm font-black uppercase tracking-wider text-blue-700">
-                        {vehicle.plate}
+                        {getVehiclePlate(vehicle)}
                       </h3>
 
                       <p className="mt-1 truncate text-[11px] font-bold text-slate-700">
-                        {customer?.fullName || "Müşteri bulunamadı"}
+                        {getClientName(vehicle)}
                       </p>
 
                       <p className="mt-1 truncate text-[10px] font-medium text-slate-400">
-                        {vehicle.note || "Araç notu bulunmuyor"}
+                        {vehicle.note?.trim() || "Araç notu bulunmuyor"}
                       </p>
-                    </div>
-
-                    <div className="shrink-0 text-right">
-                      <span className="block text-lg font-black text-slate-900">
-                        {vehicleRecords.length}
-                      </span>
-
-                      <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                        Aktif Emanet
-                      </span>
                     </div>
                   </button>
                 );
@@ -588,13 +569,11 @@ export default function VehiclesPage({
         </footer>
       </section>
 
-      {/* Araç detay alanı */}
       <section
         className={`h-full min-h-0 flex-col overflow-hidden lg:col-span-8 lg:flex ${
           isMobileDetailOpen ? "flex" : "hidden"
         }`}
       >
-        {/* Mobil geri dönüş barı */}
         <div className="mb-3 flex shrink-0 items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm lg:hidden">
           <button
             type="button"
@@ -606,15 +585,43 @@ export default function VehiclesPage({
           </button>
 
           <span className="max-w-[140px] truncate pr-2 font-mono text-[11px] font-bold uppercase text-blue-700">
-            {selectedVehicle?.plate || "Araç detayı"}
+            {getVehiclePlate(selectedVehicle)}
           </span>
         </div>
 
-        {/* Yalnızca araç detayı kayar */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 pr-0.5 [-webkit-overflow-scrolling:touch]">
-          {selectedVehicle ? (
+          {isLoadingVehicleDetail ? (
+            <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-8 text-center shadow-sm sm:rounded-3xl sm:p-12">
+              <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
+              <p className="mt-3 text-xs font-bold text-slate-500">
+                Araç detayı yükleniyor
+              </p>
+            </div>
+          ) : vehicleDetailErrorMessage ? (
+            <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-2xl border border-rose-100 bg-white p-8 text-center shadow-sm sm:rounded-3xl sm:p-12">
+              <Car className="h-9 w-9 text-rose-300" />
+
+              <h2 className="mt-3 text-sm font-black text-rose-700">
+                Araç detayı yüklenemedi
+              </h2>
+
+              <p className="mt-2 max-w-sm text-xs leading-relaxed text-rose-500">
+                {vehicleDetailErrorMessage}
+              </p>
+
+              {selectedVehicleId && (
+                <button
+                  type="button"
+                  onClick={() => loadVehicleDetail(selectedVehicleId)}
+                  className="mt-4 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+                >
+                  Tekrar Dene
+                </button>
+              )}
+            </div>
+          ) : selectedVehicle ? (
             <div className="space-y-4 sm:space-y-6">
-              {/* Araç özet kartı */}
               <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-4">
@@ -624,29 +631,40 @@ export default function VehiclesPage({
 
                     <div className="min-w-0">
                       <h2 className="truncate font-mono text-lg font-black uppercase tracking-wider text-blue-700 sm:text-xl">
-                        {selectedVehicle.plate}
+                        {getVehiclePlate(selectedVehicle)}
                       </h2>
 
                       <p className="mt-1 text-xs font-medium leading-relaxed text-slate-500">
-                        {selectedVehicle.note ||
-                          "Araç notu bulunmuyor"}
+                        {getVehicleNote(selectedVehicle)}
                       </p>
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3 text-center sm:min-w-36 sm:p-4">
                     <span className="block text-xl font-black text-blue-700 sm:text-2xl">
-                      {selectedVehicleRecords.length}
+                      {vehicleTires.length}
                     </span>
 
                     <span className="text-[10px] font-bold uppercase tracking-wide text-blue-500">
-                      Aktif Emanet
+                      Lastik Kaydı
                     </span>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                    <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
+                    Kayıt tarihi: {formatDate(selectedVehicle.createdDate)}
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                    <User className="h-4 w-4 shrink-0 text-slate-400" />
+                    Oluşturan:{" "}
+                    {selectedVehicle.createdUsername || "Belirtilmedi"}
                   </div>
                 </div>
               </div>
 
-              {/* Araç sahibi */}
               <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
                 <div className="mb-4">
                   <h3 className="text-sm font-black text-slate-900">
@@ -654,43 +672,51 @@ export default function VehiclesPage({
                   </h3>
 
                   <p className="mt-1 text-[11px] font-medium text-slate-400">
-                    Araca bağlı müşteri bilgileri
+                    Backend tarafından dönen müşteri bilgisi
                   </p>
                 </div>
 
-                {selectedCustomer ? (
-                  <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm">
-                        <User className="h-5 w-5" />
-                      </div>
+                <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm">
+                      <User className="h-5 w-5" />
+                    </div>
 
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-black text-slate-900">
-                          {selectedCustomer.fullName}
-                        </p>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black text-slate-900">
+                        {getClientName(selectedVehicle)}
+                      </p>
 
-                        <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-blue-600">
-                          <Phone className="h-3.5 w-3.5 shrink-0" />
-
-                          <span className="truncate">
-                            {selectedCustomer.phone ||
-                              "Telefon belirtilmedi"}
-                          </span>
-                        </p>
-                      </div>
+                      <p className="mt-1 text-xs font-bold text-blue-600">
+                        Müşteri ID: {selectedVehicle.clientId || "-"}
+                      </p>
                     </div>
                   </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-                    <p className="text-xs font-bold text-slate-500">
-                      Araç sahibine ulaşılamadı
-                    </p>
-                  </div>
-                )}
+                </div>
               </div>
 
-              {/* Araç görselleri */}
+              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                    <FileText className="h-5 w-5" />
+                  </div>
+
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900">
+                      Araç Notu
+                    </h3>
+
+                    <p className="mt-1 text-[11px] font-medium text-slate-400">
+                      Backend tarafından dönen not bilgisi
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm font-medium leading-relaxed text-slate-600">
+                  {selectedVehicle.note?.trim() || "Not bulunmuyor"}
+                </div>
+              </div>
+
               <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
                 <div className="mb-4">
                   <h3 className="text-sm font-black text-slate-900">
@@ -698,11 +724,11 @@ export default function VehiclesPage({
                   </h3>
 
                   <p className="mt-1 text-[11px] font-medium text-slate-400">
-                    Araca bağlı lastik kayıtlarındaki görseller
+                    Vehicle/GetById içindeki uploadFiles
                   </p>
                 </div>
 
-                {selectedVehiclePhotos.length === 0 ? (
+                {vehiclePhotos.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
                     <ImageIcon className="mx-auto h-7 w-7 text-slate-300" />
 
@@ -712,90 +738,95 @@ export default function VehiclesPage({
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                    {selectedVehiclePhotos.map((photo) => (
-                      <div
-                        key={String(photo.fileId || photo.id)}
-                        className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"
-                      >
-                        <img
-                          src={photo.dataUrl}
-                          alt={photo.name}
-                          referrerPolicy="no-referrer"
-                          className="h-full w-full object-cover"
-                        />
-                      </div>
-                    ))}
+                    {vehiclePhotos.map((file) => {
+                      const imageUrl = getBestImageUrl(file);
+
+                      return (
+                        <div
+                          key={String(file.id || file.fileId || imageUrl)}
+                          className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"
+                        >
+                          {imageUrl ? (
+                            <img
+                              src={imageUrl}
+                              alt={getFileName(file)}
+                              referrerPolicy="no-referrer"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center">
+                              <ImageIcon className="h-7 w-7 text-slate-300" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              {/* Lastik emanetleri */}
               <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
                 <div className="mb-4">
                   <h3 className="text-sm font-black text-slate-900">
-                    Bağlı Lastik Emanetleri
+                    Bağlı Lastik Kayıtları
                   </h3>
 
                   <p className="mt-1 text-[11px] font-medium text-slate-400">
-                    Bu araca ait aktif depo kayıtları
+                    Vehicle/GetById içindeki tires
                   </p>
                 </div>
 
-                {selectedVehicleRecords.length === 0 ? (
+                {vehicleTires.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
                     <p className="text-xs font-bold text-slate-500">
-                      Aktif emanet kaydı bulunmuyor
+                      Lastik kaydı bulunmuyor
                     </p>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {selectedVehicleRecords.map((record) => (
+                    {vehicleTires.map((tire) => (
                       <article
-                        key={record.id}
-                        className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between"
+                        key={tire.id}
+                        className="rounded-2xl border border-slate-200 p-4"
                       >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-lg bg-slate-900 px-2.5 py-1 font-mono text-[10px] font-black text-white">
-                              {record.tireCode}
-                            </span>
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-lg bg-slate-900 px-2.5 py-1 font-mono text-[10px] font-black text-white">
+                                {tire.code || `#${tire.id}`}
+                              </span>
 
-                            <span className="rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-1 font-mono text-[10px] font-black uppercase text-amber-700">
-                              Raf:{" "}
-                              {record.storageLocation || "Girilmedi"}
-                            </span>
+                              <span className="rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-1 font-mono text-[10px] font-black uppercase text-amber-700">
+                                Raf: {tire.storageLocation || "Girilmedi"}
+                              </span>
+                            </div>
+
+                            <p className="mt-2 text-sm font-black text-slate-900">
+                              {getTireTitle(tire)}
+                            </p>
+
+                            <p className="mt-1 text-[11px] font-medium text-slate-500">
+                              {tire.brandConstantName || "Tip belirtilmedi"} •{" "}
+                              {tire.count || 0} adet
+                            </p>
                           </div>
 
-                          <p className="mt-2 text-sm font-black text-slate-900">
-                            {record.brand} • {record.size}
-                          </p>
+                          <div className="text-left sm:text-right">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                              Kayıt tarihi
+                            </p>
 
-                          <p className="mt-1 text-[11px] font-medium text-slate-500">
-                            {record.tireType} • {record.quantity} adet
-                          </p>
+                            <p className="mt-1 text-xs font-black text-slate-600">
+                              {formatDate(tire.createdDate)}
+                            </p>
+                          </div>
                         </div>
 
-                        <div className="flex shrink-0 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => onOpenDetail(record)}
-                            className="min-h-10 flex-1 rounded-xl bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-200 sm:flex-none"
-                          >
-                            Detay
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onOpenLabelPrinter(record)
-                            }
-                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600 transition hover:bg-blue-100"
-                            title="Etiket yazdır"
-                            aria-label="Etiket yazdır"
-                          >
-                            <Printer className="h-4 w-4" />
-                          </button>
-                        </div>
+                        {tire.uploadFiles && tire.uploadFiles.length > 0 && (
+                          <p className="mt-3 text-[11px] font-bold text-slate-400">
+                            {tire.uploadFiles.length} lastik görseli var
+                          </p>
+                        )}
                       </article>
                     ))}
                   </div>
@@ -818,7 +849,6 @@ export default function VehiclesPage({
         </div>
       </section>
 
-      {/* Yeni araç modalı */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
@@ -856,17 +886,18 @@ export default function VehiclesPage({
                     onChange={(event) =>
                       setSelectedCustomerId(event.target.value)
                     }
-                    disabled={isCreatingVehicle}
+                    disabled={isCreatingVehicle || isLoadingCustomerOptions}
                     className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
                   >
-                    <option value="">Müşteri seçin</option>
+                    <option value="">
+                      {isLoadingCustomerOptions
+                        ? "Müşteriler yükleniyor..."
+                        : "Müşteri seçin"}
+                    </option>
 
-                    {customers.map((customer) => (
-                      <option
-                        key={customer.id}
-                        value={customer.id}
-                      >
-                        {customer.fullName} — {customer.phone}
+                    {customerOptions.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {getCustomerOptionText(customer)}
                       </option>
                     ))}
                   </select>
@@ -880,9 +911,7 @@ export default function VehiclesPage({
                   <input
                     type="text"
                     value={newPlate}
-                    onChange={(event) =>
-                      setNewPlate(event.target.value)
-                    }
+                    onChange={(event) => setNewPlate(event.target.value)}
                     disabled={isCreatingVehicle}
                     className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 font-mono text-sm font-black uppercase tracking-wider text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
                     placeholder="19 ABC 123"
@@ -896,9 +925,7 @@ export default function VehiclesPage({
 
                   <textarea
                     value={newNote}
-                    onChange={(event) =>
-                      setNewNote(event.target.value)
-                    }
+                    onChange={(event) => setNewNote(event.target.value)}
                     disabled={isCreatingVehicle}
                     rows={3}
                     className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 disabled:opacity-60"
@@ -922,9 +949,7 @@ export default function VehiclesPage({
                   disabled={isCreatingVehicle}
                   className="h-11 rounded-2xl bg-blue-600 text-xs font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isCreatingVehicle
-                    ? "Kaydediliyor..."
-                    : "Aracı Kaydet"}
+                  {isCreatingVehicle ? "Kaydediliyor..." : "Aracı Kaydet"}
                 </button>
               </footer>
             </form>

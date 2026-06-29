@@ -8,6 +8,7 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  RefreshCw,
   Search,
   Snowflake,
   SunMedium,
@@ -15,25 +16,40 @@ import {
 } from "lucide-react";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
   type ReactNode
 } from "react";
 
-import {
+import type {
   AppSettings,
   Customer,
   TireRecord,
   Vehicle
 } from "../types";
 
+import {
+  clientApi,
+  tireApi,
+  vehicleApi,
+  type ClientListItemDto,
+  type TireListItemDto,
+  type VehicleListItemDto
+} from "../services/tireApi";
+
 import { normalizeTurkish } from "../utils/helpers";
 
 interface RemindersPageProps {
-  customers: Customer[];
-  vehicles: Vehicle[];
-  records: TireRecord[];
+  /**
+   * Eski App.tsx prop'ları geçici uyumluluk için optional bırakıldı.
+   * Bu sayfa artık customers / vehicles / records prop'larını kullanmıyor.
+   */
+  customers?: Customer[];
+  vehicles?: Vehicle[];
+  records?: TireRecord[];
+
   settings: AppSettings;
   showToast: (
     message: string,
@@ -52,11 +68,24 @@ interface SeasonReminderRange {
   end: Date;
 }
 
+interface ReminderCustomer {
+  id: string;
+  fullName: string;
+  phone: string;
+}
+
+interface ReminderVehicle {
+  id: string;
+  clientId: string;
+  plate: string;
+  note: string;
+}
+
 interface ReminderItem {
   id: string;
-  customer: Customer;
-  vehicle: Vehicle;
-  record: TireRecord;
+  customer: ReminderCustomer;
+  vehicle: ReminderVehicle;
+  tire: TireListItemDto;
   message: string;
   daysUntilSeason: number;
   isWarning: boolean;
@@ -64,6 +93,7 @@ interface ReminderItem {
 }
 
 const WARNING_THRESHOLD_DAYS = 20;
+const REMINDER_PAGE_SIZE = 1000;
 
 function getCurrentSeasonReminderRange(
   today = new Date()
@@ -106,10 +136,7 @@ function getCurrentSeasonReminderRange(
   };
 }
 
-function getDayDifference(
-  targetDate: Date,
-  currentDate = new Date()
-) {
+function getDayDifference(targetDate: Date, currentDate = new Date()) {
   const target = new Date(
     targetDate.getFullYear(),
     targetDate.getMonth(),
@@ -123,16 +150,12 @@ function getDayDifference(
   );
 
   return Math.ceil(
-    (target.getTime() - current.getTime()) /
-      (1000 * 60 * 60 * 24)
+    (target.getTime() - current.getTime()) / (1000 * 60 * 60 * 24)
   );
 }
 
 function formatDate(value: Date | string) {
-  const date =
-    typeof value === "string"
-      ? new Date(value)
-      : value;
+  const date = typeof value === "string" ? new Date(value) : value;
 
   if (Number.isNaN(date.getTime())) {
     return "-";
@@ -150,17 +173,11 @@ function normalizePhoneForWhatsApp(phone: string) {
 
   if (!digits) return "";
 
-  if (
-    digits.startsWith("90") &&
-    digits.length === 12
-  ) {
+  if (digits.startsWith("90") && digits.length === 12) {
     return digits;
   }
 
-  if (
-    digits.startsWith("0") &&
-    digits.length === 11
-  ) {
+  if (digits.startsWith("0") && digits.length === 11) {
     return `9${digits}`;
   }
 
@@ -171,6 +188,18 @@ function normalizePhoneForWhatsApp(phone: string) {
   return digits;
 }
 
+function normalizeTireType(value?: string | null) {
+  const normalizedValue = normalizeTurkish(value || "");
+
+  if (normalizedValue.includes("kis")) return "Kışlık";
+
+  if (normalizedValue.includes("4") || normalizedValue.includes("mevsim")) {
+    return "4 Mevsim";
+  }
+
+  return "Yazlık";
+}
+
 function buildReminderMessage(params: {
   customerName: string;
   plate: string;
@@ -178,9 +207,7 @@ function buildReminderMessage(params: {
   seasonRange: SeasonReminderRange;
 }) {
   const seasonName =
-    params.seasonRange.type === "winter"
-      ? "kışlık"
-      : "yazlık";
+    params.seasonRange.type === "winter" ? "kışlık" : "yazlık";
 
   return `Merhaba ${params.customerName},
 
@@ -191,12 +218,8 @@ Geçiş dönemi ${formatDate(params.seasonRange.start)} tarihinde başlayacaktı
 ${params.businessName}`;
 }
 
-function getExpectedTireType(
-  seasonType: ReminderSeasonType
-) {
-  return seasonType === "winter"
-    ? "Kışlık"
-    : "Yazlık";
+function getExpectedTireType(seasonType: ReminderSeasonType) {
+  return seasonType === "winter" ? "Kışlık" : "Yazlık";
 }
 
 function getRemainingText(daysUntilSeason: number) {
@@ -211,106 +234,156 @@ function getRemainingText(daysUntilSeason: number) {
   return `${daysUntilSeason} gün kaldı`;
 }
 
+function mapClientToReminderCustomer(
+  client: ClientListItemDto | null,
+  fallbackName: string,
+  fallbackClientId = ""
+): ReminderCustomer {
+  return {
+    id: client ? String(client.id) : fallbackClientId,
+    fullName: client?.name || fallbackName || "Bilinmeyen Müşteri",
+    phone: client?.phone || ""
+  };
+}
+
+function mapVehicleToReminderVehicle(
+  vehicle: VehicleListItemDto | null,
+  tire: TireListItemDto
+): ReminderVehicle {
+  return {
+    id: vehicle ? String(vehicle.id) : String(tire.vehicleId || ""),
+    clientId: vehicle ? String(vehicle.clientId || "") : "",
+    plate: vehicle?.licensePlate || tire.vehicleLicensePlate || "-",
+    note: vehicle?.note || ""
+  };
+}
+
+async function buildReminderItem(params: {
+  tire: TireListItemDto;
+  seasonRange: SeasonReminderRange;
+  businessName: string;
+}): Promise<ReminderItem> {
+  const { tire, seasonRange, businessName } = params;
+
+  let vehicleDetail: VehicleListItemDto | null = null;
+  let clientDetail: ClientListItemDto | null = null;
+
+  try {
+    if (tire.vehicleId) {
+      vehicleDetail = await vehicleApi.getVehicleById(tire.vehicleId);
+    }
+  } catch (error) {
+    console.warn("Hatırlatma araç detayı alınamadı:", error);
+  }
+
+  try {
+    if (vehicleDetail?.clientId) {
+      clientDetail = await clientApi.getClientById(vehicleDetail.clientId);
+    }
+  } catch (error) {
+    console.warn("Hatırlatma müşteri detayı alınamadı:", error);
+  }
+
+  const customer = mapClientToReminderCustomer(
+    clientDetail,
+    tire.clientName || "Bilinmeyen Müşteri",
+    vehicleDetail?.clientId ? String(vehicleDetail.clientId) : ""
+  );
+
+  const vehicle = mapVehicleToReminderVehicle(vehicleDetail, tire);
+
+  const daysUntilSeason = getDayDifference(seasonRange.start);
+
+  const message = buildReminderMessage({
+    customerName: customer.fullName,
+    plate: vehicle.plate,
+    businessName,
+    seasonRange
+  });
+
+  return {
+    id: `${tire.id}-${seasonRange.type}`,
+    customer,
+    vehicle,
+    tire,
+    message,
+    daysUntilSeason,
+    isWarning: daysUntilSeason <= WARNING_THRESHOLD_DAYS,
+    seasonRange
+  };
+}
+
 export default function RemindersPage({
-  customers,
-  vehicles,
-  records,
   settings,
   showToast
 }: RemindersPageProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<ReminderFilter>("all");
 
-  const [activeFilter, setActiveFilter] =
-    useState<ReminderFilter>("all");
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
+  const [selectedReminderId, setSelectedReminderId] = useState("");
 
-  const [selectedReminderId, setSelectedReminderId] =
-    useState("");
+  const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
 
-  const [isMobileDetailOpen, setIsMobileDetailOpen] =
-    useState(false);
+  const [isLoadingReminders, setIsLoadingReminders] = useState(true);
+  const [reminderErrorMessage, setReminderErrorMessage] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const seasonRange = useMemo(
-    () => getCurrentSeasonReminderRange(),
-    []
-  );
+  const seasonRange = useMemo(() => getCurrentSeasonReminderRange(), []);
 
-  const reminders = useMemo<ReminderItem[]>(() => {
-    const expectedTireType =
-      getExpectedTireType(seasonRange.type);
+  const loadReminders = useCallback(async () => {
+    try {
+      setIsLoadingReminders(true);
+      setReminderErrorMessage("");
 
-    return records
-      .filter(
-        (record) =>
-          record.status !== "delivered" &&
-          record.tireType === expectedTireType
-      )
-      .map((record) => {
-        const customer = customers.find(
-          (item) => item.id === record.clientId
-        );
+      const expectedTireType = getExpectedTireType(seasonRange.type);
 
-        if (
-          !customer ||
-          customer.isActive === false
-        ) {
-          return null;
-        }
+      const response = await tireApi.getTires({
+        page: 0,
+        pageSize: REMINDER_PAGE_SIZE
+      });
 
-        const vehicle = vehicles.find(
-          (item) => item.id === record.vehicleId
-        );
+      const tires = response.items || [];
 
-        const daysUntilSeason =
-          getDayDifference(seasonRange.start);
-
-        const plate =
-          vehicle?.plate ||
-          record.snapshot?.plate ||
-          "Plaka belirtilmedi";
-
-        const message = buildReminderMessage({
-          customerName: customer.fullName,
-          plate,
-          businessName:
-            settings.businessName || "LastikOtelim",
-          seasonRange
-        });
-
-        return {
-          id: `${record.id}-${seasonRange.type}`,
-          customer,
-          vehicle,
-          record,
-          message,
-          daysUntilSeason,
-          isWarning:
-            daysUntilSeason <=
-            WARNING_THRESHOLD_DAYS,
-          seasonRange
-        };
-      })
-      .filter(
-        (item): item is ReminderItem =>
-          item !== null
+      const matchingTires = tires.filter(
+        (tire) => normalizeTireType(tire.brandConstantName) === expectedTireType
       );
-  }, [
-    customers,
-    vehicles,
-    records,
-    settings.businessName,
-    seasonRange
-  ]);
+
+      const builtReminders = await Promise.all(
+        matchingTires.map((tire) =>
+          buildReminderItem({
+            tire,
+            seasonRange,
+            businessName: settings.businessName || "LastikOtelim"
+          })
+        )
+      );
+
+      setReminders(builtReminders);
+    } catch (error) {
+      console.error("Hatırlatmalar yüklenemedi:", error);
+
+      setReminders([]);
+
+      setReminderErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Hatırlatmalar yüklenirken beklenmeyen bir hata oluştu."
+      );
+    } finally {
+      setIsLoadingReminders(false);
+    }
+  }, [seasonRange, settings.businessName]);
+
+  useEffect(() => {
+    void loadReminders();
+  }, [loadReminders, reloadKey]);
 
   const filteredReminders = useMemo(() => {
-    const normalizedQuery = normalizeTurkish(
-      searchQuery.trim()
-    );
+    const normalizedQuery = normalizeTurkish(searchQuery.trim());
 
     return reminders.filter((item) => {
-      if (
-        activeFilter === "warning" &&
-        !item.isWarning
-      ) {
+      if (activeFilter === "warning" && !item.isWarning) {
         return false;
       }
 
@@ -319,78 +392,55 @@ export default function RemindersPage({
       const searchableText = [
         item.customer.fullName,
         item.customer.phone,
-        item.vehicle?.plate,
-        item.record.snapshot?.plate,
-        item.record.tireCode,
-        item.record.brand,
-        item.record.size,
-        item.record.storageLocation
+        item.vehicle.plate,
+        item.tire.code,
+        item.tire.modelConstantName,
+        item.tire.sizes,
+        item.tire.storageLocation
       ]
         .filter(Boolean)
         .join(" ");
 
-      return normalizeTurkish(
-        searchableText
-      ).includes(normalizedQuery);
+      return normalizeTurkish(searchableText).includes(normalizedQuery);
     });
-  }, [
-    reminders,
-    searchQuery,
-    activeFilter
-  ]);
+  }, [reminders, searchQuery, activeFilter]);
 
   useEffect(() => {
-    const selectedReminderStillVisible =
-      filteredReminders.some(
-        (item) =>
-          item.id === selectedReminderId
-      );
+    const selectedReminderStillVisible = filteredReminders.some(
+      (item) => item.id === selectedReminderId
+    );
 
     if (selectedReminderStillVisible) {
       return;
     }
 
-    const nextReminderId =
-      filteredReminders[0]?.id || "";
+    const nextReminderId = filteredReminders[0]?.id || "";
 
     setSelectedReminderId(nextReminderId);
 
     if (!nextReminderId) {
       setIsMobileDetailOpen(false);
     }
-  }, [
-    filteredReminders,
-    selectedReminderId
-  ]);
+  }, [filteredReminders, selectedReminderId]);
 
   const selectedReminder = reminders.find(
     (item) => item.id === selectedReminderId
   );
 
-  const warningCount = reminders.filter(
-    (item) => item.isWarning
-  ).length;
+  const warningCount = reminders.filter((item) => item.isWarning).length;
 
-  const handleSelectReminder = (
-    reminderId: string
-  ) => {
+  const handleSelectReminder = (reminderId: string) => {
     setSelectedReminderId(reminderId);
     setIsMobileDetailOpen(true);
   };
 
-  const handleFilterChange = (
-    filter: ReminderFilter
-  ) => {
+  const handleFilterChange = (filter: ReminderFilter) => {
     setActiveFilter(filter);
     setIsMobileDetailOpen(false);
   };
 
-  const openWhatsApp = (
-    item: ReminderItem
-  ) => {
-    const phone = normalizePhoneForWhatsApp(
-      item.customer.phone
-    );
+  const openWhatsApp = (item: ReminderItem) => {
+    const phone = normalizePhoneForWhatsApp(item.customer.phone);
 
     if (!phone || phone.length < 10) {
       showToast(
@@ -401,47 +451,30 @@ export default function RemindersPage({
       return;
     }
 
-    const url =
-      `https://wa.me/${phone}?text=${encodeURIComponent(
-        item.message
-      )}`;
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(
+      item.message
+    )}`;
 
-    window.open(
-      url,
-      "_blank",
-      "noopener,noreferrer"
-    );
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const copyMessage = async (
-    message: string
-  ) => {
+  const copyMessage = async (message: string) => {
     try {
       await navigator.clipboard.writeText(message);
 
-      showToast(
-        "Hatırlatma mesajı panoya kopyalandı.",
-        "success"
-      );
+      showToast("Hatırlatma mesajı panoya kopyalandı.", "success");
     } catch {
-      showToast(
-        "Mesaj panoya kopyalanamadı.",
-        "error"
-      );
+      showToast("Mesaj panoya kopyalanamadı.", "error");
     }
   };
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden text-slate-950 animate-slide-in lg:grid-cols-12 lg:gap-6">
-      {/* Hatırlatma listesi */}
       <section
         className={`h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm lg:col-span-4 lg:flex lg:rounded-3xl ${
-          isMobileDetailOpen
-            ? "hidden"
-            : "flex"
+          isMobileDetailOpen ? "hidden" : "flex"
         }`}
       >
-        {/* Üst özet alanı */}
         <header className="shrink-0 border-b border-slate-100 bg-slate-50/60 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -455,14 +488,31 @@ export default function RemindersPage({
               </p>
             </div>
 
-            <div className="shrink-0 text-right">
-              <span className="block text-xl font-black text-amber-700">
-                {warningCount}
-              </span>
+            <div className="flex shrink-0 items-center gap-3">
+              <div className="text-right">
+                <span className="block text-xl font-black text-amber-700">
+                  {warningCount}
+                </span>
 
-              <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                Yaklaşan
-              </span>
+                <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
+                  Yaklaşan
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setReloadKey((currentKey) => currentKey + 1)}
+                disabled={isLoadingReminders}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Hatırlatmaları yenile"
+                aria-label="Hatırlatmaları yenile"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${
+                    isLoadingReminders ? "animate-spin" : ""
+                  }`}
+                />
+              </button>
             </div>
           </div>
 
@@ -482,17 +532,13 @@ export default function RemindersPage({
                 </p>
 
                 <p className="mt-1 text-[10px] font-semibold leading-relaxed text-blue-700">
-                  {formatDate(
-                    seasonRange.start
-                  )}{" "}
-                  başlangıç
+                  {formatDate(seasonRange.start)} başlangıç
                 </p>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Arama ve filtre */}
         <div className="shrink-0 space-y-3 border-b border-slate-100 p-4">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -500,11 +546,7 @@ export default function RemindersPage({
             <input
               type="text"
               value={searchQuery}
-              onChange={(event) =>
-                setSearchQuery(
-                  event.target.value
-                )
-              }
+              onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Müşteri, telefon, plaka veya kod ara..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-xs font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
             />
@@ -513,9 +555,7 @@ export default function RemindersPage({
           <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
             <button
               type="button"
-              onClick={() =>
-                handleFilterChange("all")
-              }
+              onClick={() => handleFilterChange("all")}
               className={`rounded-lg px-3 py-2 text-[10px] font-black transition ${
                 activeFilter === "all"
                   ? "bg-white text-slate-900 shadow-sm"
@@ -527,9 +567,7 @@ export default function RemindersPage({
 
             <button
               type="button"
-              onClick={() =>
-                handleFilterChange("warning")
-              }
+              onClick={() => handleFilterChange("warning")}
               className={`rounded-lg px-3 py-2 text-[10px] font-black transition ${
                 activeFilter === "warning"
                   ? "bg-white text-amber-700 shadow-sm"
@@ -541,9 +579,36 @@ export default function RemindersPage({
           </div>
         </div>
 
-        {/* Yalnızca hatırlatma listesi kayar */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-          {filteredReminders.length === 0 ? (
+          {isLoadingReminders ? (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
+              <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
+              <p className="text-xs font-bold text-slate-500">
+                Hatırlatmalar yükleniyor
+              </p>
+            </div>
+          ) : reminderErrorMessage ? (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 p-8 text-center">
+              <BellRing className="h-8 w-8 text-rose-300" />
+
+              <p className="text-xs font-black text-rose-700">
+                Hatırlatmalar yüklenemedi
+              </p>
+
+              <p className="text-[11px] font-medium leading-relaxed text-rose-500">
+                {reminderErrorMessage}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setReloadKey((currentKey) => currentKey + 1)}
+                className="mt-1 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+              >
+                Tekrar Dene
+              </button>
+            </div>
+          ) : filteredReminders.length === 0 ? (
             <div className="flex h-full min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
               <CalendarClock className="h-7 w-7 text-slate-300" />
 
@@ -552,35 +617,22 @@ export default function RemindersPage({
               </p>
 
               <p className="max-w-xs text-[10px] leading-relaxed text-slate-400">
-                Aktif döneme uygun lastik
-                kaydı bulunmuyor.
+                Aktif döneme uygun lastik kaydı bulunmuyor.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
               {filteredReminders.map((item) => {
-                const isSelected =
-                  selectedReminderId ===
-                  item.id;
-
-                const remainingText =
-                  getRemainingText(
-                    item.daysUntilSeason
-                  );
+                const isSelected = selectedReminderId === item.id;
+                const remainingText = getRemainingText(item.daysUntilSeason);
 
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() =>
-                      handleSelectReminder(
-                        item.id
-                      )
-                    }
+                    onClick={() => handleSelectReminder(item.id)}
                     className={`relative flex w-full items-start justify-between gap-4 px-4 py-4 text-left transition sm:px-5 ${
-                      isSelected
-                        ? "bg-blue-50/80"
-                        : "hover:bg-slate-50"
+                      isSelected ? "bg-blue-50/80" : "hover:bg-slate-50"
                     }`}
                   >
                     {isSelected && (
@@ -593,15 +645,12 @@ export default function RemindersPage({
                       </h3>
 
                       <p className="mt-1 truncate font-mono text-[11px] font-black uppercase text-blue-700">
-                        {item.vehicle?.plate ||
-                          item.record.snapshot
-                            ?.plate ||
-                          "-"}
+                        {item.vehicle.plate || "-"}
                       </p>
 
                       <p className="mt-1 truncate text-[10px] font-medium text-slate-400">
-                        {item.record.brand} •{" "}
-                        {item.record.size}
+                        {item.tire.modelConstantName || "-"} •{" "}
+                        {item.tire.sizes || "-"}
                       </p>
                     </div>
 
@@ -622,21 +671,15 @@ export default function RemindersPage({
         </div>
       </section>
 
-      {/* Hatırlatma detay alanı */}
       <section
         className={`h-full min-h-0 flex-col overflow-hidden lg:col-span-8 lg:flex ${
-          isMobileDetailOpen
-            ? "flex"
-            : "hidden"
+          isMobileDetailOpen ? "flex" : "hidden"
         }`}
       >
-        {/* Mobil geri dönüş barı */}
         <div className="mb-3 flex shrink-0 items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm lg:hidden">
           <button
             type="button"
-            onClick={() =>
-              setIsMobileDetailOpen(false)
-            }
+            onClick={() => setIsMobileDetailOpen(false)}
             className="inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 active:scale-[0.98]"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -644,27 +687,16 @@ export default function RemindersPage({
           </button>
 
           <span className="max-w-[130px] truncate pr-2 text-[10px] font-bold text-blue-700">
-            {selectedReminder?.customer
-              .fullName ||
-              "Hatırlatma detayı"}
+            {selectedReminder?.customer.fullName || "Hatırlatma detayı"}
           </span>
         </div>
 
-        {/* Yalnızca detay alanı kayar */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 pr-0.5 [-webkit-overflow-scrolling:touch]">
           {selectedReminder ? (
             <ReminderDetail
               item={selectedReminder}
-              onOpenWhatsApp={() =>
-                openWhatsApp(
-                  selectedReminder
-                )
-              }
-              onCopyMessage={() =>
-                copyMessage(
-                  selectedReminder.message
-                )
-              }
+              onOpenWhatsApp={() => openWhatsApp(selectedReminder)}
+              onCopyMessage={() => copyMessage(selectedReminder.message)}
             />
           ) : (
             <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-8 text-center shadow-sm sm:rounded-3xl sm:p-12">
@@ -675,8 +707,7 @@ export default function RemindersPage({
               </h2>
 
               <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-400">
-                Detayları görüntülemek için
-                hatırlatma listesinden bir müşteri
+                Detayları görüntülemek için hatırlatma listesinden bir müşteri
                 seçin.
               </p>
             </div>
@@ -698,16 +729,13 @@ function ReminderDetail({
 }) {
   const remainingText =
     item.daysUntilSeason < 0
-      ? `${Math.abs(
-          item.daysUntilSeason
-        )} gün geçti`
+      ? `${Math.abs(item.daysUntilSeason)} gün geçti`
       : item.daysUntilSeason === 0
         ? "Geçiş dönemi bugün başlıyor"
         : `${item.daysUntilSeason} gün kaldı`;
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Müşteri özeti */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-4">
@@ -724,8 +752,7 @@ function ReminderDetail({
                 <Phone className="h-3.5 w-3.5 shrink-0" />
 
                 <span className="truncate">
-                  {item.customer.phone ||
-                    "Telefon belirtilmedi"}
+                  {item.customer.phone || "Telefon belirtilmedi"}
                 </span>
               </p>
             </div>
@@ -744,9 +771,7 @@ function ReminderDetail({
 
             <p
               className={`mt-1 text-base font-black sm:text-lg ${
-                item.isWarning
-                  ? "text-amber-800"
-                  : "text-slate-800"
+                item.isWarning ? "text-amber-800" : "text-slate-800"
               }`}
             >
               {remainingText}
@@ -755,7 +780,6 @@ function ReminderDetail({
         </div>
       </section>
 
-      {/* Yaklaşan uyarısı */}
       {item.isWarning && (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:rounded-3xl sm:p-5">
           <div className="flex items-start gap-3">
@@ -767,76 +791,48 @@ function ReminderDetail({
               </h3>
 
               <p className="mt-1 text-xs font-semibold leading-relaxed text-amber-700">
-                Geçiş dönemine 20 gün veya daha
-                az kaldı.
+                Geçiş dönemine 20 gün veya daha az kaldı.
               </p>
             </div>
           </div>
         </section>
       )}
 
-      {/* Araç ve depo */}
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         <DetailCard
           icon={<Car className="h-5 w-5" />}
           label="Araç Plakası"
-          value={
-            item.vehicle?.plate ||
-            item.record.snapshot?.plate ||
-            "-"
-          }
-          secondary={
-            item.vehicle?.note ||
-            item.record.vehicleNote ||
-            "Araç notu bulunmuyor"
-          }
+          value={item.vehicle.plate || "-"}
+          secondary={item.vehicle.note || "Araç notu bulunmuyor"}
           mono
         />
 
         <DetailCard
           icon={<MapPin className="h-5 w-5" />}
           label="Depo Konumu"
-          value={
-            item.record.storageLocation ||
-            "Girilmedi"
-          }
-          secondary={
-            item.record.tireCode || "-"
-          }
+          value={item.tire.storageLocation || "Girilmedi"}
+          secondary={item.tire.code || "-"}
           mono
         />
       </section>
 
-      {/* Lastik bilgileri */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
-        <h3 className="text-sm font-black text-slate-900">
-          Lastik Bilgileri
-        </h3>
+        <h3 className="text-sm font-black text-slate-900">Lastik Bilgileri</h3>
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:grid-cols-4">
-          <InfoItem
-            label="Marka"
-            value={item.record.brand}
-          />
+          <InfoItem label="Marka" value={item.tire.modelConstantName || "-"} />
 
-          <InfoItem
-            label="Ebat"
-            value={item.record.size}
-          />
+          <InfoItem label="Ebat" value={item.tire.sizes || "-"} />
 
           <InfoItem
             label="Mevsim"
-            value={item.record.tireType}
+            value={item.tire.brandConstantName || "-"}
           />
 
-          <InfoItem
-            label="Adet"
-            value={`${item.record.quantity} adet`}
-          />
+          <InfoItem label="Adet" value={`${item.tire.count || 0} adet`} />
         </div>
       </section>
 
-      {/* Geçiş dönemi */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -849,19 +845,13 @@ function ReminderDetail({
             </h3>
 
             <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
-              {formatDate(
-                item.seasonRange.start
-              )}{" "}
-              -{" "}
-              {formatDate(
-                item.seasonRange.end
-              )}
+              {formatDate(item.seasonRange.start)} -{" "}
+              {formatDate(item.seasonRange.end)}
             </p>
           </div>
         </div>
       </section>
 
-      {/* WhatsApp mesajı */}
       <section className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm sm:rounded-3xl sm:p-6">
         <div className="flex items-center gap-2 text-sm font-black text-blue-800">
           <MessageCircle className="h-5 w-5 shrink-0" />
@@ -921,9 +911,7 @@ function DetailCard({
 
       <p
         className={`mt-1 truncate text-sm font-black text-slate-900 ${
-          mono
-            ? "font-mono uppercase tracking-wider"
-            : ""
+          mono ? "font-mono uppercase tracking-wider" : ""
         }`}
         title={value}
       >
@@ -940,13 +928,7 @@ function DetailCard({
   );
 }
 
-function InfoItem({
-  label,
-  value
-}: {
-  label: string;
-  value: string;
-}) {
+function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-2xl border border-slate-100 bg-slate-50 p-3 sm:p-4">
       <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">

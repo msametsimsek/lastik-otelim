@@ -14,6 +14,8 @@ import {
   X,
 } from "lucide-react";
 
+
+
 import { TirePhoto, TireRecord, TireType } from "../../types";
 import {
   clientApi,
@@ -232,6 +234,8 @@ export default function TireRecordModal({
     [clientSearchResults, selectedClientId],
   );
 
+  
+
   const exactClientMatch = useMemo(
     () => findExactClientMatch(clientSearchResults, fullName, phone),
     [clientSearchResults, fullName, phone],
@@ -317,6 +321,46 @@ export default function TireRecordModal({
       vehiclePendingPhotos.length,
     ],
   );
+
+  useEffect(() => {
+  if (currentStep !== 1 || !effectiveClientId) {
+    return;
+  }
+
+  let isMounted = true;
+
+  async function loadClientVehicles() {
+    try {
+      setIsSearchingVehicle(true);
+
+      const response = await vehicleApi.getVehicles({
+        page: 0,
+        pageSize: 50,
+        clientId: Number(effectiveClientId)
+      });
+
+      if (!isMounted) return;
+
+      setVehicleSearchResults(response.items || []);
+    } catch (error) {
+      console.error(error);
+
+      if (!isMounted) return;
+
+      setVehicleSearchResults([]);
+    } finally {
+      if (isMounted) {
+        setIsSearchingVehicle(false);
+      }
+    }
+  }
+
+  loadClientVehicles();
+
+  return () => {
+    isMounted = false;
+  };
+}, [currentStep, effectiveClientId]);
 
   useEffect(() => {
     pendingPhotosRef.current = pendingPhotos;
