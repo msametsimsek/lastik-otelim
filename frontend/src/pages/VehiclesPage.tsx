@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent
 } from "react";
@@ -27,6 +28,7 @@ import {
   clientApi,
   type ClientListItemDto,
   searchPlaceholders,
+  tireApi,
   type TireListItemDto,
   type UploadFileDto,
   vehicleApi,
@@ -36,25 +38,21 @@ import {
 import { formatDate, formatPlate } from "../utils/helpers";
 
 interface VehiclesPageProps {
-  /**
-   * Eski App.tsx prop'ları geçici olarak optional bırakıldı.
-   * Bu sayfa artık bunları kullanmıyor.
-   */
   vehicles?: Vehicle[];
   customers?: Customer[];
   records?: TireRecord[];
   onRefreshData?: () => void | Promise<void>;
   onOpenDetail?: (record: TireRecord) => void;
   onOpenLabelPrinter?: (record: TireRecord) => void;
-
   showToast: (
     message: string,
     type: "success" | "error" | "info" | "warning"
   ) => void;
 }
 
-const VEHICLE_PAGE_SIZE = 20;
-const CUSTOMER_SELECT_PAGE_SIZE = 1000;
+type VehicleDetailState = VehicleListItemDto & {
+  tires?: TireListItemDto[];
+};
 
 type VehiclePaginationState = {
   index: number;
@@ -64,6 +62,10 @@ type VehiclePaginationState = {
   hasPrevious: boolean;
   hasNext: boolean;
 };
+
+const VEHICLE_PAGE_SIZE = 20;
+const VEHICLE_TIRE_PAGE_SIZE = 1000;
+const CUSTOMER_SELECT_PAGE_SIZE = 1000;
 
 const EMPTY_VEHICLE_PAGINATION: VehiclePaginationState = {
   index: 0,
@@ -130,11 +132,17 @@ function getCustomerOptionText(customer: ClientListItemDto) {
 
 export default function VehiclesPage({ showToast }: VehiclesPageProps) {
   const [vehicles, setVehicles] = useState<VehicleListItemDto[]>([]);
+
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(
     null
   );
+
+  const selectedVehicleIdRef = useRef<number | null>(null);
+  const vehicleDetailInFlightRef = useRef<number | null>(null);
+  const loadedVehicleDetailIdRef = useRef<number | null>(null);
+
   const [selectedVehicle, setSelectedVehicle] =
-    useState<VehicleListItemDto | null>(null);
+    useState<VehicleDetailState | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -153,9 +161,11 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
     useState("");
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
   const [customerOptions, setCustomerOptions] = useState<ClientListItemDto[]>(
     []
   );
+
   const [isLoadingCustomerOptions, setIsLoadingCustomerOptions] =
     useState(false);
 
@@ -174,28 +184,77 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
     [selectedVehicle]
   );
 
-  const loadVehicleDetail = useCallback(async (vehicleId: number) => {
-    try {
-      setIsLoadingVehicleDetail(true);
-      setVehicleDetailErrorMessage("");
+  useEffect(() => {
+    selectedVehicleIdRef.current = selectedVehicleId;
+  }, [selectedVehicleId]);
 
-      const detail = await vehicleApi.getVehicleById(vehicleId);
+  const resetSelectedVehicle = useCallback(() => {
+    selectedVehicleIdRef.current = null;
+    loadedVehicleDetailIdRef.current = null;
+    vehicleDetailInFlightRef.current = null;
 
-      setSelectedVehicle(detail);
-    } catch (error) {
-      console.error("Araç detayı yüklenemedi:", error);
-
-      setSelectedVehicle(null);
-
-      setVehicleDetailErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Araç detayı yüklenirken beklenmeyen bir hata oluştu."
-      );
-    } finally {
-      setIsLoadingVehicleDetail(false);
-    }
+    setSelectedVehicleId(null);
+    setSelectedVehicle(null);
+    setVehicleDetailErrorMessage("");
+    setIsMobileDetailOpen(false);
   }, []);
+
+  const loadVehicleDetail = useCallback(
+    async (vehicleId: number, options?: { force?: boolean }) => {
+      if (!options?.force && loadedVehicleDetailIdRef.current === vehicleId) {
+        return;
+      }
+
+      if (vehicleDetailInFlightRef.current === vehicleId) {
+        return;
+      }
+
+      try {
+        vehicleDetailInFlightRef.current = vehicleId;
+
+        setIsLoadingVehicleDetail(true);
+        setVehicleDetailErrorMessage("");
+
+        const [detail, tireResponse] = await Promise.all([
+          vehicleApi.getVehicleById(vehicleId),
+          tireApi.getTires({
+            page: 0,
+            pageSize: VEHICLE_TIRE_PAGE_SIZE
+          })
+        ]);
+
+        const vehicleTireItems = (tireResponse.items || []).filter(
+          (tire) => tire.vehicleId === vehicleId
+        );
+
+        loadedVehicleDetailIdRef.current = vehicleId;
+
+        setSelectedVehicle({
+          ...detail,
+          tires: vehicleTireItems
+        });
+      } catch (error) {
+        console.error("Araç detayı yüklenemedi:", error);
+
+        loadedVehicleDetailIdRef.current = null;
+
+        setSelectedVehicle(null);
+
+        setVehicleDetailErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Araç detayı yüklenirken beklenmeyen bir hata oluştu."
+        );
+      } finally {
+        if (vehicleDetailInFlightRef.current === vehicleId) {
+          vehicleDetailInFlightRef.current = null;
+        }
+
+        setIsLoadingVehicleDetail(false);
+      }
+    },
+    []
+  );
 
   const loadVehicles = useCallback(
     async (
@@ -236,26 +295,27 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
           (preferredVehicleId
             ? items.find((vehicle) => vehicle.id === preferredVehicleId)
             : undefined) ||
-          (selectedVehicleId
-            ? items.find((vehicle) => vehicle.id === selectedVehicleId)
+          (selectedVehicleIdRef.current
+            ? items.find(
+                (vehicle) => vehicle.id === selectedVehicleIdRef.current
+              )
             : undefined) ||
           items[0];
 
         if (nextSelectedVehicle) {
+          selectedVehicleIdRef.current = nextSelectedVehicle.id;
+
           setSelectedVehicleId(nextSelectedVehicle.id);
+
           await loadVehicleDetail(nextSelectedVehicle.id);
         } else {
-          setSelectedVehicleId(null);
-          setSelectedVehicle(null);
-          setIsMobileDetailOpen(false);
+          resetSelectedVehicle();
         }
       } catch (error) {
         console.error("Araçlar yüklenemedi:", error);
 
         setVehicles([]);
-        setSelectedVehicleId(null);
-        setSelectedVehicle(null);
-        setIsMobileDetailOpen(false);
+        resetSelectedVehicle();
         setPagination(EMPTY_VEHICLE_PAGINATION);
 
         setVehicleErrorMessage(
@@ -267,7 +327,7 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
         setIsLoadingVehicles(false);
       }
     },
-    [loadVehicleDetail, searchQuery, selectedVehicleId]
+    [loadVehicleDetail, resetSelectedVehicle, searchQuery]
   );
 
   const loadCustomerOptions = useCallback(async () => {
@@ -297,7 +357,7 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
   }, [showToast]);
 
   useEffect(() => {
-    loadVehicles(page);
+    void loadVehicles(page);
   }, [loadVehicles, page]);
 
   const totalRecords = pagination.count;
@@ -312,6 +372,8 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
     (pagination.hasNext || (totalPages > 0 && page < totalPages - 1));
 
   const handleSelectVehicle = async (vehicleId: number) => {
+    selectedVehicleIdRef.current = vehicleId;
+
     setSelectedVehicleId(vehicleId);
     setIsMobileDetailOpen(true);
 
@@ -319,13 +381,21 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
   };
 
   const handleSearchChange = (value: string) => {
+    selectedVehicleIdRef.current = null;
+    loadedVehicleDetailIdRef.current = null;
+
     setSearchQuery(value);
     setPage(0);
+    setSelectedVehicleId(null);
+    setSelectedVehicle(null);
+    setVehicleDetailErrorMessage("");
     setIsMobileDetailOpen(false);
   };
 
   const handlePreviousPage = () => {
     if (!canGoPrevious) return;
+
+    loadedVehicleDetailIdRef.current = null;
 
     setPage((currentPage) => Math.max(0, currentPage - 1));
     setIsMobileDetailOpen(false);
@@ -333,6 +403,8 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
 
   const handleNextPage = () => {
     if (!canGoNext) return;
+
+    loadedVehicleDetailIdRef.current = null;
 
     setPage((currentPage) => currentPage + 1);
     setIsMobileDetailOpen(false);
@@ -380,6 +452,8 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
         imageIds: []
       });
 
+      loadedVehicleDetailIdRef.current = null;
+
       setSearchQuery("");
       setPage(0);
 
@@ -425,7 +499,7 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              onClick={() => loadVehicles(page)}
+              onClick={() => void loadVehicles(page)}
               disabled={isLoadingVehicles}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
               title="Araçları yenile"
@@ -486,7 +560,7 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
 
               <button
                 type="button"
-                onClick={() => loadVehicles(page)}
+                onClick={() => void loadVehicles(page)}
                 className="mt-1 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
               >
                 Tekrar Dene
@@ -509,7 +583,7 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
                   <button
                     key={vehicle.id}
                     type="button"
-                    onClick={() => handleSelectVehicle(vehicle.id)}
+                    onClick={() => void handleSelectVehicle(vehicle.id)}
                     className={`relative flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition sm:px-5 ${
                       isSelected ? "bg-blue-50/80" : "hover:bg-slate-50"
                     }`}
@@ -613,7 +687,9 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
               {selectedVehicleId && (
                 <button
                   type="button"
-                  onClick={() => loadVehicleDetail(selectedVehicleId)}
+                  onClick={() =>
+                    void loadVehicleDetail(selectedVehicleId, { force: true })
+                  }
                   className="mt-4 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
                 >
                   Tekrar Dene
@@ -772,7 +848,7 @@ export default function VehiclesPage({ showToast }: VehiclesPageProps) {
                   </h3>
 
                   <p className="mt-1 text-[11px] font-medium text-slate-400">
-                    Vehicle/GetById içindeki tires
+                    Bu araca bağlı Tire/GetList kayıtları
                   </p>
                 </div>
 

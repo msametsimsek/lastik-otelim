@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent
 } from "react";
@@ -8,6 +9,7 @@ import {
 import {
   ArrowLeft,
   Calendar,
+  Car,
   FileText,
   Phone,
   Plus,
@@ -21,16 +23,18 @@ import type { Customer, TireRecord, Vehicle } from "../types";
 
 import {
   clientApi,
-  ClientListItemDto,
-  searchPlaceholders
+  type ClientListItemDto,
+  searchPlaceholders,
+  vehicleApi,
+  type VehicleListItemDto
 } from "../services/tireApi";
 
 import { formatDate } from "../utils/helpers";
 
 interface CustomersPageProps {
   /**
-   * Bu eski prop'lar App.tsx tarafı temizlenene kadar geçici olarak duruyor.
-   * Bu sayfa artık bu verileri kullanmıyor.
+   * Eski App.tsx prop'ları geçici olarak optional bırakıldı.
+   * Bu sayfa artık bunları kullanmıyor.
    */
   customers?: Customer[];
   vehicles?: Vehicle[];
@@ -46,6 +50,7 @@ interface CustomersPageProps {
 }
 
 const CUSTOMER_PAGE_SIZE = 20;
+const CUSTOMER_VEHICLE_PAGE_SIZE = 1000;
 
 type CustomerPaginationState = {
   index: number;
@@ -67,21 +72,48 @@ const EMPTY_CUSTOMER_PAGINATION: CustomerPaginationState = {
 
 function getCustomerDisplayName(customer: ClientListItemDto | null) {
   if (!customer) return "";
+
   return customer.name?.trim() || "İsimsiz Müşteri";
 }
 
 function getCustomerInitial(customer: ClientListItemDto | null) {
   const name = getCustomerDisplayName(customer);
+
   return name.charAt(0).toUpperCase() || "M";
+}
+
+function getCustomerPhone(customer: ClientListItemDto | null) {
+  return customer?.phone?.trim() || "Telefon belirtilmedi";
+}
+
+function getCustomerNote(customer: ClientListItemDto | null) {
+  return customer?.note?.trim() || "Not bulunmuyor";
+}
+
+function getVehiclePlate(vehicle: VehicleListItemDto) {
+  return vehicle.licensePlate?.trim() || "-";
+}
+
+function getVehicleNote(vehicle: VehicleListItemDto) {
+  return vehicle.note?.trim() || "Araç notu bulunmuyor";
 }
 
 export default function CustomersPage({ showToast }: CustomersPageProps) {
   const [customers, setCustomers] = useState<ClientListItemDto[]>([]);
+
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
     null
   );
+  const selectedCustomerIdRef = useRef<number | null>(null);
+  const customerDetailInFlightRef = useRef<number | null>(null);
+  const loadedCustomerDetailIdRef = useRef<number | null>(null);
+
   const [selectedCustomer, setSelectedCustomer] =
     useState<ClientListItemDto | null>(null);
+
+  const [selectedCustomerVehicles, setSelectedCustomerVehicles] = useState<
+    VehicleListItemDto[]
+  >([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -104,19 +136,57 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
 
+  useEffect(() => {
+    selectedCustomerIdRef.current = selectedCustomerId;
+  }, [selectedCustomerId]);
+
+  const resetSelectedCustomer = useCallback(() => {
+    selectedCustomerIdRef.current = null;
+    customerDetailInFlightRef.current = null;
+    loadedCustomerDetailIdRef.current = null;
+
+    setSelectedCustomerId(null);
+    setSelectedCustomer(null);
+    setSelectedCustomerVehicles([]);
+    setIsMobileDetailOpen(false);
+  }, []);
+
   const loadCustomerDetail = useCallback(
-    async (customerId: number) => {
+    async (customerId: number, options?: { force?: boolean }) => {
+      if (!options?.force && loadedCustomerDetailIdRef.current === customerId) {
+        return;
+      }
+
+      if (customerDetailInFlightRef.current === customerId) {
+        return;
+      }
+
       try {
+        customerDetailInFlightRef.current = customerId;
+
         setIsLoadingCustomerDetail(true);
         setCustomerDetailErrorMessage("");
 
-        const detail = await clientApi.getClientById(customerId);
+        const [detail, vehicleResponse] = await Promise.all([
+          clientApi.getClientById(customerId),
+          vehicleApi.getVehicles({
+            page: 0,
+            pageSize: CUSTOMER_VEHICLE_PAGE_SIZE,
+            clientId: customerId
+          })
+        ]);
+
+        loadedCustomerDetailIdRef.current = customerId;
 
         setSelectedCustomer(detail);
+        setSelectedCustomerVehicles(vehicleResponse.items || []);
       } catch (error) {
         console.error("Müşteri detayı yüklenemedi:", error);
 
+        loadedCustomerDetailIdRef.current = null;
+
         setSelectedCustomer(null);
+        setSelectedCustomerVehicles([]);
 
         setCustomerDetailErrorMessage(
           error instanceof Error
@@ -124,6 +194,10 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
             : "Müşteri detayı yüklenirken beklenmeyen bir hata oluştu."
         );
       } finally {
+        if (customerDetailInFlightRef.current === customerId) {
+          customerDetailInFlightRef.current = null;
+        }
+
         setIsLoadingCustomerDetail(false);
       }
     },
@@ -132,7 +206,7 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
 
   const loadCustomers = useCallback(
     async (
-      targetPage = page,
+      targetPage = 0,
       options?: {
         search?: string;
         preferredCustomerId?: number;
@@ -164,30 +238,31 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
         });
 
         const preferredCustomerId = options?.preferredCustomerId;
+
         const nextSelectedCustomer =
           (preferredCustomerId
             ? items.find((customer) => customer.id === preferredCustomerId)
             : undefined) ||
-          (selectedCustomerId
-            ? items.find((customer) => customer.id === selectedCustomerId)
+          (selectedCustomerIdRef.current
+            ? items.find(
+                (customer) => customer.id === selectedCustomerIdRef.current
+              )
             : undefined) ||
           items[0];
 
         if (nextSelectedCustomer) {
+          selectedCustomerIdRef.current = nextSelectedCustomer.id;
           setSelectedCustomerId(nextSelectedCustomer.id);
+
           await loadCustomerDetail(nextSelectedCustomer.id);
         } else {
-          setSelectedCustomerId(null);
-          setSelectedCustomer(null);
-          setIsMobileDetailOpen(false);
+          resetSelectedCustomer();
         }
       } catch (error) {
         console.error("Müşteriler yüklenemedi:", error);
 
         setCustomers([]);
-        setSelectedCustomerId(null);
-        setSelectedCustomer(null);
-        setIsMobileDetailOpen(false);
+        resetSelectedCustomer();
         setPagination(EMPTY_CUSTOMER_PAGINATION);
 
         setCustomerErrorMessage(
@@ -199,7 +274,7 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
         setIsLoadingCustomers(false);
       }
     },
-    [loadCustomerDetail, page, searchQuery, selectedCustomerId]
+    [loadCustomerDetail, resetSelectedCustomer, searchQuery]
   );
 
   useEffect(() => {
@@ -218,6 +293,7 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
     (pagination.hasNext || (totalPages > 0 && page < totalPages - 1));
 
   const handleSelectCustomer = async (customerId: number) => {
+    selectedCustomerIdRef.current = customerId;
     setSelectedCustomerId(customerId);
     setIsMobileDetailOpen(true);
 
@@ -225,8 +301,13 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
   };
 
   const handleSearchChange = (value: string) => {
+    selectedCustomerIdRef.current = null;
+
     setSearchQuery(value);
     setPage(0);
+    setSelectedCustomerId(null);
+    setSelectedCustomer(null);
+    setSelectedCustomerVehicles([]);
     setIsMobileDetailOpen(false);
   };
 
@@ -275,6 +356,8 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
         note: ""
       });
 
+      selectedCustomerIdRef.current = createdCustomer.id;
+
       setSearchQuery("");
       setPage(0);
 
@@ -310,9 +393,7 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 p-4 sm:p-5">
           <div className="min-w-0">
-            <h2 className="text-sm font-black text-slate-900">
-              Müşteriler
-            </h2>
+            <h2 className="text-sm font-black text-slate-900">Müşteriler</h2>
 
             <p className="mt-1 text-[11px] font-medium text-slate-400">
               {totalRecords} kayıtlı müşteri
@@ -514,7 +595,9 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
               {selectedCustomerId && (
                 <button
                   type="button"
-                  onClick={() => loadCustomerDetail(selectedCustomerId)}
+                  onClick={() =>
+                    loadCustomerDetail(selectedCustomerId, { force: true })
+                  }
                   className="mt-4 rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
                 >
                   Tekrar Dene
@@ -539,7 +622,7 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
                         <Phone className="h-4 w-4 shrink-0" />
 
                         <span className="truncate">
-                          {selectedCustomer.phone || "Telefon belirtilmedi"}
+                          {getCustomerPhone(selectedCustomer)}
                         </span>
                       </p>
                     </div>
@@ -578,8 +661,73 @@ export default function CustomersPage({ showToast }: CustomersPageProps) {
                 </div>
 
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm font-medium leading-relaxed text-slate-600">
-                  {selectedCustomer.note?.trim() || "Not bulunmuyor"}
+                  {getCustomerNote(selectedCustomer)}
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                      <Car className="h-5 w-5" />
+                    </div>
+
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900">
+                        Müşteriye Bağlı Araçlar
+                      </h3>
+
+                      <p className="mt-1 text-[11px] font-medium text-slate-400">
+                        Vehicle/GetList?ClientId={selectedCustomer.id} sonucu
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700">
+                    {selectedCustomerVehicles.length} araç
+                  </span>
+                </div>
+
+                {selectedCustomerVehicles.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+                    <Car className="mx-auto h-7 w-7 text-slate-300" />
+
+                    <p className="mt-2 text-xs font-bold text-slate-500">
+                      Bu müşteriye bağlı araç bulunmuyor
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {selectedCustomerVehicles.map((vehicle) => (
+                      <article
+                        key={vehicle.id}
+                        className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-mono text-sm font-black uppercase tracking-wider text-blue-700">
+                              {getVehiclePlate(vehicle)}
+                            </p>
+
+                            <p className="mt-1 text-xs font-semibold text-slate-500">
+                              {getVehicleNote(vehicle)}
+                            </p>
+                          </div>
+
+                          <div className="text-left sm:text-right">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                              Kayıt tarihi
+                            </p>
+
+                            <p className="mt-1 text-xs font-black text-slate-600">
+                              {formatDate(vehicle.createdDate)}
+                            </p>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ) : (

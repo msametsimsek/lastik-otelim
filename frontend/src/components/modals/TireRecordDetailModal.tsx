@@ -489,7 +489,7 @@ export default function TireRecordDetailModal({
             type: file.type,
             dataUrl: backendPreviewUrl || localPreviewUrl,
             fileUrl: uploadedFile.fileUrl,
-            source: "vehicle"
+            source: "tire"
           });
 
           uploadedCount++;
@@ -513,7 +513,7 @@ export default function TireRecordDetailModal({
 
       if (uploadedCount > 0) {
         showToast(
-          `${uploadedCount} yeni fotoğraf yüklendi. Yeni fotoğraflar araç görseli olarak kaydedilecek.`,
+          `${uploadedCount} yeni fotoğraf yüklendi. Yeni fotoğraflar lastik görseli olarak kaydedilecek.`,
           "success"
         );
       }
@@ -579,11 +579,17 @@ export default function TireRecordDetailModal({
         .filter((fileId): fileId is number => fileId !== null)
     );
 
-    const activeImageIds = uniqueNumberList(
+    const tireImageIds = uniqueNumberList(
       activePhotos
+        .filter((photo) => photo.source === "tire")
         .map(getPhotoFileId)
         .filter((fileId): fileId is number => fileId !== null)
     );
+
+    const activeImageIds = uniqueNumberList([
+      ...vehicleImageIds,
+      ...tireImageIds
+    ]);
 
     if (
       !trimmedFullName ||
@@ -654,12 +660,13 @@ export default function TireRecordDetailModal({
       });
 
       const updatedTire = await tireApi.updateTire({
-        id: Number(activeRecord.id),
+        id: Number(record.id),
         modelConstantId,
         brandConstantId,
         sizes: trimmedSize,
         count: Number(quantity),
-        storageLocation: trimmedLocation
+        storageLocation: trimmedLocation,
+        imageIds: tireImageIds
       });
 
       let failedDeleteCount = 0;
@@ -1046,13 +1053,12 @@ export default function TireRecordDetailModal({
 
               <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-slate-50/60 p-4">
                 <label className="block font-mono text-xs font-black uppercase tracking-widest text-slate-450">
-                  Resim Havuzu Dokümantasyonu
+                  Görsel Ayrımı
                 </label>
 
                 <p className="text-[10px] font-semibold leading-relaxed text-slate-400">
-                  Backend Tire/Update içinde lastik imageIds olmadığı için yeni
-                  yüklenen görseller araç görseli olarak Vehicle/Update üzerinden
-                  saklanır.
+                  Araç görselleri Vehicle/Update imageIds alanına, lastik
+                  görselleri ise Tire/Update imageIds alanına gönderilir.
                 </p>
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1069,7 +1075,7 @@ export default function TireRecordDetailModal({
                     <Upload className="h-5 w-5 text-slate-400" />
 
                     <span className="text-[10px] font-bold text-slate-700">
-                      Araç Fotoğrafı Ekle
+                      Lastik Fotoğrafı Ekle
                     </span>
                   </label>
 
@@ -1302,7 +1308,7 @@ export default function TireRecordDetailModal({
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <h5 className="font-mono text-[10px] font-black uppercase tracking-widest text-slate-450">
-                    Hasar / Resim Albümü ({photos.length})
+                    Araç / Lastik Albümü ({photos.length})
                   </h5>
 
                   {photos.length > 0 && (

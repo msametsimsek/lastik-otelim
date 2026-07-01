@@ -33,6 +33,12 @@ export interface VehicleListParams extends GetListParams {
   clientId?: number;
 }
 
+export interface TireListParams extends GetListParams {
+  vehicleId?: number;
+  clientId?: number;
+}
+
+
 export interface HistoryListParams extends GetListParams {
   count?: number;
   typeConstantValue?: string;
@@ -318,6 +324,20 @@ function buildVehicleListQuery(params: VehicleListParams = {}) {
   return query.toString();
 }
 
+function buildTireListQuery(params: TireListParams = {}) {
+  const query = new URLSearchParams(buildGetListQuery(params));
+
+  if (typeof params.vehicleId === "number" && params.vehicleId > 0) {
+    query.set("VehicleId", String(params.vehicleId));
+  }
+
+  if (typeof params.clientId === "number" && params.clientId > 0) {
+    query.set("ClientId", String(params.clientId));
+  }
+
+  return query.toString();
+}
+
 function buildHistoryListQuery(params: HistoryListParams = {}) {
   const query = new URLSearchParams(buildGetListQuery(params));
 
@@ -457,7 +477,7 @@ export const constantApi = {
 
 export const tireApi = {
   async getTires(
-    pageOrParams: number | GetListParams = DEFAULT_PAGE,
+    pageOrParams: number | TireListParams = DEFAULT_PAGE,
     pageSize = DEFAULT_PAGE_SIZE
   ) {
     const params =
@@ -466,15 +486,15 @@ export const tireApi = {
         : pageOrParams;
 
     const response = await request<Partial<PaginatedResponse<TireListItemDto>>>(
-      buildEndpointWithQuery("/tire/Tire/GetList", buildGetListQuery(params))
+      buildEndpointWithQuery("/tire/Tire/GetList", buildTireListQuery(params))
     );
 
     return normalizePaginatedResponse(response, params);
   },
 
-  async getList(params: GetListParams = {}) {
+  async getList(params: TireListParams = {}) {
     const response = await request<Partial<PaginatedResponse<TireListItemDto>>>(
-      buildEndpointWithQuery("/tire/Tire/GetList", buildGetListQuery(params))
+      buildEndpointWithQuery("/tire/Tire/GetList", buildTireListQuery(params))
     );
 
     return normalizePaginatedResponse(response, params);

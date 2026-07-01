@@ -1,20 +1,37 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   BadgeCheck,
   CalendarDays,
   CheckCircle2,
   CreditCard,
   Crown,
+  Landmark,
+  MapPin,
   RefreshCcw,
+  Save,
   ShieldCheck,
   Sparkles
 } from "lucide-react";
 
 import {
-  SubscriptionPlanId,
   UserSubscription,
   SubscriptionBillingCycle
 } from "../types";
+
+import {
+  SubscriptionApi,
+  SubscriptionPlanDto
+} from "../services/subscriptionApi";
+
+import {
+  AddressApi,
+  AddressDto
+} from "../services/addressApi";
+
+import {
+  BankAccountApi,
+  BankAccountDto
+} from "../services/bankAccountApi";
 
 interface SubscriptionPageProps {
   subscription: UserSubscription;
@@ -28,77 +45,124 @@ interface SubscriptionPageProps {
 type BillingCycle = SubscriptionBillingCycle;
 
 interface Plan {
-  id: SubscriptionPlanId;
+  id: string;
+  apiId?: number;
   name: string;
-  monthlyPrice: number;
-  yearlyPrice: number;
+  price: number;
+  vatExcludedPrice?: number;
+  vatPercent?: string | null;
+  vatPrice?: number;
+  durationDays?: number;
+  durationLabel: string;
   description: string;
   features: string[];
   limits: string[];
   popular?: boolean;
+  isFromApi?: boolean;
 }
 
-const PLANS: Plan[] = [
+interface AddressFormState {
+  title: string;
+  contactName: string;
+  addressLine: string;
+  city: string;
+  country: string;
+  zipCode: string;
+}
+
+interface CardPaymentFormState {
+  cardHolderName: string;
+  cardNumber: string;
+  expireMonth: string;
+  expireYear: string;
+  cvc: string;
+  registerCard: boolean;
+}
+
+interface BankTransferReceipt {
+  transactionId?: string;
+  referenceCode: string;
+  subscriptionPlan: string;
+  amount: number;
+}
+
+type SubscriptionFlowStep =
+  | "plans"
+  | "details"
+  | "payment"
+  | "bankTransferReceipt";
+
+const FALLBACK_PLANS: Plan[] = [
   {
     id: "starter",
     name: "Başlangıç",
-    monthlyPrice: 299,
-    yearlyPrice: 2990,
-    description: "Küçük lastikçiler için temel takip paketi.",
+    price: 299,
+    durationLabel: "aylık",
+    description: "Küçük işletmeler için temel takip paketi.",
     features: [
       "Etiket yazdırma",
-      "Temel dashboard",
+      "Genel durum ekranı",
       "Müşteri ve plaka takibi",
       "Depo raf sorgulama"
     ],
-    limits: [
-      "100 müşteri",
-      "300 lastik kaydı",
-      "1 kullanıcı"
-    ]
+    limits: ["100 müşteri", "300 lastik kaydı", "1 kullanıcı"]
   },
   {
     id: "pro",
     name: "Pro",
-    monthlyPrice: 499,
-    yearlyPrice: 4990,
+    price: 499,
+    durationLabel: "aylık",
     description: "Yoğun çalışan işletmeler için ideal paket.",
     features: [
       "Gelişmiş depo takibi",
       "Etiket geçmişi",
       "Sınırsız müşteri",
-      "Raporlama altyapısı"
+      "Raporlama"
     ],
-    limits: [
-      "1000 lastik kaydı",
-      "3 kullanıcı",
-      "Öncelikli özellikler"
-    ],
+    limits: ["1000 lastik kaydı", "3 kullanıcı", "Öncelikli kullanım"],
     popular: true
   },
   {
     id: "enterprise",
     name: "Kurumsal",
-    monthlyPrice: 899,
-    yearlyPrice: 8990,
-    description:
-      "Birden fazla kullanıcı ve geniş operasyonlar için.",
+    price: 899,
+    durationLabel: "aylık",
+    description: "Birden fazla kullanıcı ve geniş operasyonlar için.",
     features: [
       "Sınırsız kayıt",
       "Çoklu kullanıcı",
       "Gelişmiş raporlar",
       "Öncelikli destek"
     ],
-    limits: [
-      "Sınırsız müşteri",
-      "Sınırsız lastik kaydı",
-      "10 kullanıcı"
-    ]
+    limits: ["Sınırsız müşteri", "Sınırsız lastik kaydı", "10 kullanıcı"]
   }
 ];
 
+const EMPTY_ADDRESS_FORM: AddressFormState = {
+  title: "Ana Teslimat Adresi",
+  contactName: "",
+  addressLine: "",
+  city: "",
+  country: "Türkiye",
+  zipCode: ""
+};
+
+const EMPTY_CARD_PAYMENT_FORM: CardPaymentFormState = {
+  cardHolderName: "",
+  cardNumber: "",
+  expireMonth: "",
+  expireYear: "",
+  cvc: "",
+  registerCard: false
+};
+
 function formatPrice(value: number) {
-  return `₺${value.toLocaleString("tr-TR")}`;
+  const hasDecimal = value % 1 !== 0;
+
+  return `₺${value.toLocaleString("tr-TR", {
+    minimumFractionDigits: hasDecimal ? 2 : 0,
+    maximumFractionDigits: 2
+  })}`;
 }
 
 function formatDateTR(date?: string) {
@@ -122,15 +186,113 @@ function getBillingCycleLabel(cycle?: BillingCycle) {
 }
 
 function getBillingCycleDescription(cycle?: BillingCycle) {
-  return cycle === "yearly"
-    ? "12 aylık abonelik"
-    : "1 aylık abonelik";
+  return cycle === "yearly" ? "12 aylık abonelik" : "1 aylık abonelik";
 }
 
-function getPlanPrice(plan: Plan, cycle: BillingCycle) {
-  return cycle === "yearly"
-    ? plan.yearlyPrice
-    : plan.monthlyPrice;
+function getDurationLabel(durationDays?: number) {
+  if (!durationDays || durationDays <= 0) {
+    return "abonelik";
+  }
+
+  if (durationDays >= 365) {
+    return "1 yıllık";
+  }
+
+  if (durationDays % 30 === 0) {
+    return `${durationDays / 30} aylık`;
+  }
+
+  return `${durationDays} günlük`;
+}
+
+function getApiIncludedPrice(plan: SubscriptionPlanDto) {
+  const includedPrice =
+    plan.vatInculededPrice ?? plan.vatIncludedPrice ?? plan.price;
+
+  const parsedPrice = Number(includedPrice);
+
+  return Number.isFinite(parsedPrice) ? parsedPrice : 0;
+}
+
+function normalizeOnlyNumbers(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function formatIban(value: string) {
+  return value
+    .replace(/\s/g, "")
+    .replace(/(.{4})/g, "$1 ")
+    .trim();
+}
+
+function writeThreeDSHtmlToWindow(
+  paymentWindow: Window,
+  htmlContent: string
+) {
+  paymentWindow.document.open();
+  paymentWindow.document.write(htmlContent);
+  paymentWindow.document.close();
+}
+
+function getAddressTypeLabel(address?: AddressDto) {
+  const type = address?.type?.trim();
+
+  if (!type) return "Teslimat Adresi";
+
+  return type;
+}
+
+function getAddressSummary(address?: AddressDto) {
+  if (!address) return "Adres bulunamadı.";
+
+  const parts = [
+    address.addressLine,
+    address.city,
+    address.country,
+    address.zipCode
+  ].filter(Boolean);
+
+  return parts.join(" / ") || "Adres detayı eksik.";
+}
+
+function mapSubscriptionPlanToPlan(
+  plan: SubscriptionPlanDto,
+  index: number
+): Plan {
+  const durationLabel = getDurationLabel(plan.durationDays);
+  const cleanDescription = plan.description?.trim();
+
+  const isPopular =
+    plan.durationDays === 180 ||
+    plan.name.toLocaleLowerCase("tr-TR").includes("6 aylık") ||
+    index === 1;
+
+  return {
+    id: String(plan.id),
+    apiId: plan.id,
+    name: plan.name,
+    price: getApiIncludedPrice(plan),
+    vatExcludedPrice: plan.price,
+    vatPercent: plan.vatPercent,
+    vatPrice: plan.vatPrice,
+    durationDays: plan.durationDays,
+    durationLabel,
+    description:
+      cleanDescription || `${durationLabel} Lastik Otelim abonelik paketi.`,
+    features: [
+      `${durationLabel} kullanım hakkı`,
+      "Müşteri ve plaka takibi",
+      "Lastik emanet ve depo yönetimi",
+      "Etiket ve kayıt işlemleri"
+    ],
+    limits: [
+      `${plan.durationDays} gün kullanım`,
+      `KDV: %${plan.vatPercent || "0"}`,
+      `KDV hariç: ${formatPrice(plan.price)}`
+    ],
+    popular: isPopular,
+    isFromApi: true
+  };
 }
 
 export default function SubscriptionPage({
@@ -138,82 +300,667 @@ export default function SubscriptionPage({
   onSubscriptionChange,
   showToast
 }: SubscriptionPageProps) {
-  const billingCycle: BillingCycle =
-    subscription.billingCycle || "monthly";
+  const [apiPlans, setApiPlans] = useState<Plan[]>([]);
+  const [isPlansLoading, setIsPlansLoading] = useState(false);
+  const [plansError, setPlansError] = useState("");
+  const [plansReloadKey, setPlansReloadKey] = useState(0);
 
-  const currentPlan = useMemo(
-    () =>
-      PLANS.find(
-        (plan) => plan.id === subscription.planId
-      ),
-    [subscription.planId]
+  const [addresses, setAddresses] = useState<AddressDto[]>([]);
+  const [isAddressesLoading, setIsAddressesLoading] = useState(false);
+  const [isAddressSaving, setIsAddressSaving] = useState(false);
+  const [addressesError, setAddressesError] = useState("");
+  const [addressesReloadKey, setAddressesReloadKey] = useState(0);
+
+  const [bankAccounts, setBankAccounts] = useState<BankAccountDto[]>([]);
+  const [isBankAccountsLoading, setIsBankAccountsLoading] = useState(false);
+  const [bankAccountsError, setBankAccountsError] = useState("");
+  const [bankAccountsReloadKey, setBankAccountsReloadKey] = useState(0);
+
+  const [identityNumber, setIdentityNumber] = useState("");
+
+  const [paymentLoadingPlanId, setPaymentLoadingPlanId] =
+    useState<string | null>(null);
+
+  const [bankTransferReceipt, setBankTransferReceipt] =
+    useState<BankTransferReceipt | null>(null);
+
+  const [selectedThreeDSPlan, setSelectedThreeDSPlan] =
+    useState<Plan | null>(null);
+
+  const [threeDSForm, setThreeDSForm] =
+    useState<CardPaymentFormState>(EMPTY_CARD_PAYMENT_FORM);
+
+  const [isThreeDSLoading, setIsThreeDSLoading] = useState(false);
+
+  const [addressForm, setAddressForm] =
+    useState<AddressFormState>(EMPTY_ADDRESS_FORM);
+
+  const [isSubscribeFlowOpen, setIsSubscribeFlowOpen] = useState(false);
+  const [subscriptionStep, setSubscriptionStep] =
+    useState<SubscriptionFlowStep>("plans");
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+
+  const billingCycle: BillingCycle = subscription.billingCycle || "monthly";
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadPlans() {
+      setIsPlansLoading(true);
+      setPlansError("");
+
+      try {
+        const response = await SubscriptionApi.getPlans({
+          page: 0,
+          pageSize: 20
+        });
+
+        if (ignore) return;
+
+        const mappedPlans = response.items.map(mapSubscriptionPlanToPlan);
+
+        setApiPlans(mappedPlans);
+      } catch (error) {
+        if (ignore) return;
+
+        setApiPlans([]);
+        setPlansError(
+          error instanceof Error
+            ? error.message
+            : "Abonelik planları yüklenemedi."
+        );
+      } finally {
+        if (!ignore) {
+          setIsPlansLoading(false);
+        }
+      }
+    }
+
+    loadPlans();
+
+    return () => {
+      ignore = true;
+    };
+  }, [plansReloadKey]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadAddresses() {
+      setIsAddressesLoading(true);
+      setAddressesError("");
+
+      try {
+        const response = await AddressApi.getList({
+          page: 0,
+          pageSize: 20
+        });
+
+        if (ignore) return;
+
+        setAddresses(Array.isArray(response.items) ? response.items : []);
+      } catch (error) {
+        if (ignore) return;
+
+        setAddresses([]);
+        setAddressesError(
+          error instanceof Error
+            ? error.message
+            : "Adres bilgileri yüklenemedi."
+        );
+      } finally {
+        if (!ignore) {
+          setIsAddressesLoading(false);
+        }
+      }
+    }
+
+    loadAddresses();
+
+    return () => {
+      ignore = true;
+    };
+  }, [addressesReloadKey]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadBankAccounts() {
+      setIsBankAccountsLoading(true);
+      setBankAccountsError("");
+
+      try {
+        const response = await BankAccountApi.getList({
+          page: 0,
+          pageSize: 20
+        });
+
+        if (ignore) return;
+
+        setBankAccounts(Array.isArray(response.items) ? response.items : []);
+      } catch (error) {
+        if (ignore) return;
+
+        setBankAccounts([]);
+        setBankAccountsError(
+          error instanceof Error
+            ? error.message
+            : "Banka hesapları yüklenemedi."
+        );
+      } finally {
+        if (!ignore) {
+          setIsBankAccountsLoading(false);
+        }
+      }
+    }
+
+    loadBankAccounts();
+
+    return () => {
+      ignore = true;
+    };
+  }, [bankAccountsReloadKey]);
+
+  const plans = useMemo(
+    () => (apiPlans.length > 0 ? apiPlans : FALLBACK_PLANS),
+    [apiPlans]
   );
 
+  const shippingAddress = useMemo(() => {
+    const teslimatAddress = addresses.find((address) => {
+      const upperType = address.type?.toLocaleUpperCase("tr-TR") || "";
+
+      return upperType.includes("TESLIMAT") || upperType.includes("TESLİMAT");
+    });
+
+    return teslimatAddress || addresses[0];
+  }, [addresses]);
+
+  const currentPlan = useMemo(() => {
+    const currentPlanId = subscription.planId ? String(subscription.planId) : "";
+
+    return plans.find((plan) => {
+      return (
+        plan.id === currentPlanId ||
+        (Boolean(subscription.planName) && plan.name === subscription.planName)
+      );
+    });
+  }, [plans, subscription.planId, subscription.planName]);
+
   const activePlanPrice = currentPlan
-    ? getPlanPrice(currentPlan, billingCycle)
+    ? currentPlan.price
     : subscription.amount || 0;
 
-  const activeEndDate =
-    subscription.periodEndAt ||
-    subscription.renewalDate;
+  const activeEndDate = subscription.periodEndAt || subscription.renewalDate;
 
-  const handlePlanAction = (plan: Plan) => {
-    showToast(
-      `${plan.name} planı için abonelik ve ödeme endpoint'i henüz backend'e bağlı değil. Sahte ödeme veya local abonelik oluşturulmadı.`,
-      "warning"
+  const isSubscriptionPending = String(subscription.status) === "pending";
+
+  const handleStartSubscription = () => {
+    setIsSubscribeFlowOpen(true);
+    setSubscriptionStep("plans");
+    setSelectedPlan(null);
+    setSelectedThreeDSPlan(null);
+    setBankTransferReceipt(null);
+  };
+
+  const handleCloseSubscriptionFlow = () => {
+    if (Boolean(paymentLoadingPlanId) || isThreeDSLoading || isAddressSaving) {
+      return;
+    }
+
+    setIsSubscribeFlowOpen(false);
+    setSubscriptionStep("plans");
+    setSelectedPlan(null);
+    setSelectedThreeDSPlan(null);
+    setThreeDSForm(EMPTY_CARD_PAYMENT_FORM);
+  };
+
+  const handleSelectPlan = (plan: Plan) => {
+    if (!plan.isFromApi || !plan.apiId) {
+      showToast(
+        "Bu plan için ödeme seçeneği hazır değil. Lütfen bilgileri yenileyin.",
+        "warning"
+      );
+      return;
+    }
+
+    setSelectedPlan(plan);
+    setSelectedThreeDSPlan(null);
+    setBankTransferReceipt(null);
+    setSubscriptionStep("details");
+  };
+
+  const validateSelectedPaymentDetails = () => {
+    if (!selectedPlan?.apiId) {
+      showToast("Lütfen önce abonelik paketi seçin.", "warning");
+      return null;
+    }
+
+    if (!selectedPlan.isFromApi) {
+      showToast(
+        "Bu plan için ödeme seçeneği hazır değil. Lütfen bilgileri yenileyin.",
+        "warning"
+      );
+      return null;
+    }
+
+    if (!shippingAddress?.id) {
+      showToast(
+        "Ödeme adımına geçmek için teslimat/fatura adresi ekleyin.",
+        "warning"
+      );
+      return null;
+    }
+
+    const cleanIdentityNumber = normalizeOnlyNumbers(identityNumber);
+
+    if (
+      cleanIdentityNumber.length !== 10 &&
+      cleanIdentityNumber.length !== 11
+    ) {
+      showToast(
+        "Ödeme adımına geçmek için 10 haneli vergi no veya 11 haneli T.C. kimlik no girin.",
+        "warning"
+      );
+      return null;
+    }
+
+    return {
+      planId: selectedPlan.apiId,
+      identityNumber: cleanIdentityNumber,
+      shippingAddressId: shippingAddress.id
+    };
+  };
+
+  const handleContinueToPayment = () => {
+    const paymentDetails = validateSelectedPaymentDetails();
+
+    if (!paymentDetails) return;
+
+    setSelectedThreeDSPlan(null);
+    setSubscriptionStep("payment");
+  };
+
+  const handleBackToPlans = () => {
+    if (Boolean(paymentLoadingPlanId) || isThreeDSLoading) return;
+
+    setSelectedPlan(null);
+    setSelectedThreeDSPlan(null);
+    setSubscriptionStep("plans");
+  };
+
+  const handleBackToDetails = () => {
+    if (Boolean(paymentLoadingPlanId) || isThreeDSLoading) return;
+
+    setSelectedThreeDSPlan(null);
+    setThreeDSForm(EMPTY_CARD_PAYMENT_FORM);
+    setSubscriptionStep("details");
+  };
+
+  const handleAddressInputChange =
+    (field: keyof AddressFormState) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setAddressForm((currentForm) => ({
+        ...currentForm,
+        [field]: event.target.value
+      }));
+    };
+
+  const handleCreateAddress = async () => {
+    const title = addressForm.title.trim() || "Ana Teslimat Adresi";
+    const contactName = addressForm.contactName.trim();
+    const addressLine = addressForm.addressLine.trim();
+    const city = addressForm.city.trim();
+    const country = addressForm.country.trim() || "Türkiye";
+    const zipCode = addressForm.zipCode.trim();
+
+    if (!contactName || !addressLine || !city) {
+      showToast(
+        "Adres eklemek için yetkili kişi, açık adres ve şehir alanlarını doldurun.",
+        "warning"
+      );
+      return;
+    }
+
+    setIsAddressSaving(true);
+
+    try {
+      await AddressApi.add({
+        type: "TESLIMAT",
+        title,
+        contactName,
+        addressLine,
+        city,
+        country,
+        zipCode
+      });
+
+      setAddressForm(EMPTY_ADDRESS_FORM);
+      setAddressesReloadKey((currentKey) => currentKey + 1);
+
+      showToast(
+        "Teslimat/fatura adresi kaydedildi. Artık ödeme başlatabilirsiniz.",
+        "success"
+      );
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Adres kaydedilemedi.",
+        "error"
+      );
+    } finally {
+      setIsAddressSaving(false);
+    }
+  };
+
+  const validateSharedPaymentRequirements = (
+    plan: Plan,
+    paymentType: "bankTransfer" | "threeDS"
+  ) => {
+    if (!plan.isFromApi || !plan.apiId) {
+      showToast(
+        `Bu plan için ödeme başlatılamıyor. Lütfen bilgileri yenileyin.`,
+        "warning"
+      );
+      return null;
+    }
+
+    if (!shippingAddress?.id) {
+      showToast(
+        paymentType === "threeDS"
+          ? "Kart ile ödeme için önce teslimat/fatura adresi ekleyin."
+          : "Havale talebi oluşturmak için önce teslimat/fatura adresi ekleyin.",
+        "warning"
+      );
+      return null;
+    }
+
+    const cleanIdentityNumber = normalizeOnlyNumbers(identityNumber);
+
+    if (
+      cleanIdentityNumber.length !== 10 &&
+      cleanIdentityNumber.length !== 11
+    ) {
+      showToast(
+        paymentType === "threeDS"
+          ? "Kart ile ödeme için 10 haneli vergi no veya 11 haneli T.C. kimlik no girin."
+          : "Havale talebi için 10 haneli vergi no veya 11 haneli T.C. kimlik no girin.",
+        "warning"
+      );
+      return null;
+    }
+
+    return {
+      planId: plan.apiId,
+      identityNumber: cleanIdentityNumber,
+      shippingAddressId: shippingAddress.id
+    };
+  };
+
+  const handlePlanAction = async (plan: Plan) => {
+    const paymentBase = validateSharedPaymentRequirements(plan, "bankTransfer");
+
+    if (!paymentBase) return;
+
+    setPaymentLoadingPlanId(plan.id);
+
+    try {
+      const response = await SubscriptionApi.createBankTransferPayment({
+        subscriptionPlanId: paymentBase.planId,
+        identityNumber: paymentBase.identityNumber,
+        shippingAddressId: paymentBase.shippingAddressId,
+        billingAddressId: null,
+        useShippingAsBilling: true
+      });
+
+      setBankTransferReceipt({
+        transactionId: response.transactionId,
+        referenceCode: response.referenceCode || "",
+        subscriptionPlan: response.subscriptionPlan || plan.name,
+        amount:
+          typeof response.amount === "number"
+            ? response.amount
+            : plan.price
+      });
+
+      setSubscriptionStep("bankTransferReceipt");
+
+      showToast(
+        response.referenceCode
+          ? `${plan.name} için havale talebi oluşturuldu. Referans kodu: ${response.referenceCode}`
+          : `${plan.name} için havale abonelik talebi oluşturuldu.`,
+        "success"
+      );
+
+      void onSubscriptionChange();
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Havale abonelik talebi oluşturulamadı.",
+        "error"
+      );
+    } finally {
+      setPaymentLoadingPlanId(null);
+    }
+  };
+
+  const handleThreeDSInputChange =
+    (field: keyof CardPaymentFormState) =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value =
+        field === "cardNumber" ||
+        field === "expireMonth" ||
+        field === "expireYear" ||
+        field === "cvc"
+          ? normalizeOnlyNumbers(event.target.value)
+          : event.target.value;
+
+      setThreeDSForm((currentForm) => ({
+        ...currentForm,
+        [field]: value
+      }));
+    };
+
+  const handleOpenThreeDSForm = (plan: Plan) => {
+    const paymentBase = validateSharedPaymentRequirements(plan, "threeDS");
+
+    if (!paymentBase) return;
+
+    setSelectedThreeDSPlan(plan);
+    setThreeDSForm(EMPTY_CARD_PAYMENT_FORM);
+  };
+
+  const handleCloseThreeDSForm = () => {
+    if (isThreeDSLoading) return;
+
+    setSelectedThreeDSPlan(null);
+    setThreeDSForm(EMPTY_CARD_PAYMENT_FORM);
+    setSubscriptionStep("payment");
+  };
+
+  const handleInitializeThreeDSPayment = async () => {
+    if (!selectedThreeDSPlan?.apiId) {
+      showToast("Kart ile ödeme için plan seçimi bulunamadı.", "warning");
+      return;
+    }
+
+    if (!shippingAddress?.id) {
+      showToast("Kart ile ödeme için teslimat/fatura adresi bulunamadı.", "warning");
+      return;
+    }
+
+    const cleanIdentityNumber = normalizeOnlyNumbers(identityNumber);
+    const cleanCardNumber = normalizeOnlyNumbers(threeDSForm.cardNumber);
+    const cleanExpireMonth = normalizeOnlyNumbers(threeDSForm.expireMonth);
+    const cleanExpireYear = normalizeOnlyNumbers(threeDSForm.expireYear);
+    const cleanCvc = normalizeOnlyNumbers(threeDSForm.cvc);
+
+    if (
+      cleanIdentityNumber.length !== 10 &&
+      cleanIdentityNumber.length !== 11
+    ) {
+      showToast(
+        "Kart ile ödeme için 10 haneli vergi no veya 11 haneli T.C. kimlik no girin.",
+        "warning"
+      );
+      return;
+    }
+
+    if (!threeDSForm.cardHolderName.trim()) {
+      showToast("Kart üzerindeki isim alanını doldurun.", "warning");
+      return;
+    }
+
+    if (cleanCardNumber.length < 12) {
+      showToast("Kart numarası eksik görünüyor.", "warning");
+      return;
+    }
+
+    if (!cleanExpireMonth || !cleanExpireYear) {
+      showToast("Kart son kullanma ay/yıl alanlarını doldurun.", "warning");
+      return;
+    }
+
+    if (cleanCvc.length < 3) {
+      showToast("CVC alanını kontrol edin.", "warning");
+      return;
+    }
+
+    const paymentWindow = window.open("", "_blank");
+
+    if (!paymentWindow) {
+      showToast(
+        "Kart doğrulama penceresi açılamadı. Tarayıcınızın açılır pencere iznini kontrol edin.",
+        "error"
+      );
+      return;
+    }
+
+    writeThreeDSHtmlToWindow(
+      paymentWindow,
+      "<p style='font-family:Arial,sans-serif;padding:24px'>Kart doğrulama sayfası hazırlanıyor...</p>"
     );
+
+    setIsThreeDSLoading(true);
+
+    try {
+      const response = await SubscriptionApi.initializeThreeDSPayment({
+        subscriptionPlanId: selectedThreeDSPlan.apiId,
+        identityNumber: cleanIdentityNumber,
+        shippingAddressId: shippingAddress.id,
+        billingAddressId: null,
+        useShippingAsBilling: true,
+        autoRenew: false,
+        paymentCard: {
+          cardHolderName: threeDSForm.cardHolderName,
+          cardNumber: cleanCardNumber,
+          expireMonth: cleanExpireMonth,
+          expireYear: cleanExpireYear,
+          cvc: cleanCvc,
+          registerCard: threeDSForm.registerCard
+        }
+      });
+
+      if (response.success === false) {
+        throw new Error(
+          response.errorMessage ||
+            response.message ||
+            "Kart doğrulama başlatılamadı."
+        );
+      }
+
+      const htmlContent = response.htmlContent || response.threeDSHtmlContent;
+      const redirectUrl = response.redirectUrl || response.paymentPageUrl;
+
+      if (htmlContent) {
+        writeThreeDSHtmlToWindow(paymentWindow, htmlContent);
+      } else if (redirectUrl) {
+        paymentWindow.location.href = redirectUrl;
+      } else {
+        paymentWindow.close();
+
+        throw new Error(
+          response.errorMessage ||
+            response.message ||
+            "Kart doğrulama sayfası oluşturulamadı."
+        );
+      }
+
+      showToast(
+        "Kart ile ödeme başlatıldı.",
+        "success"
+      );
+
+      setSelectedThreeDSPlan(null);
+      setThreeDSForm(EMPTY_CARD_PAYMENT_FORM);
+
+      void onSubscriptionChange();
+    } catch (error) {
+      paymentWindow.close();
+
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Kart ile ödeme başlatılamadı.",
+        "error"
+      );
+    } finally {
+      setIsThreeDSLoading(false);
+    }
   };
 
   const handleCancelSubscription = () => {
     showToast(
-      "Abonelik pasife alma endpoint'i henüz backend'e bağlı değil. Local abonelik durumu değiştirilmedi.",
+      "Aboneliği pasife alma işlemi şu anda hazır değil.",
       "warning"
     );
   };
 
   const handleRefreshSubscription = () => {
-    onSubscriptionChange();
+    setPlansReloadKey((currentKey) => currentKey + 1);
+    setAddressesReloadKey((currentKey) => currentKey + 1);
+    setBankAccountsReloadKey((currentKey) => currentKey + 1);
+
+    void onSubscriptionChange();
 
     showToast(
-      "Abonelik bilgileri API üzerinden yeniden yükleniyor.",
+      "Abonelik, plan, adres ve banka bilgileri yeniden yükleniyor.",
       "info"
     );
   };
 
   return (
     <div className="h-full min-h-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
-      <div className="mx-auto w-full max-w-[1500px] space-y-6 pb-4 animate-slide-in sm:space-y-8 sm:pb-6">
-        {/* Sayfa başlığı */}
-        <header className="rounded-2xl border border-slate-200/80 bg-white p-5 text-center shadow-sm sm:rounded-3xl sm:p-7">
-          <div className="flex flex-col items-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-[11px] font-black text-blue-700">
-              <CreditCard className="h-3.5 w-3.5" />
-              Abonelik Yönetimi
+      <div className="mx-auto w-full max-w-[1500px] space-y-5 pb-4 animate-slide-in sm:space-y-6 sm:pb-6">
+        <header className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm sm:rounded-3xl sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-[11px] font-black text-blue-700">
+                <CreditCard className="h-3.5 w-3.5" />
+                Abonelik Yönetimi
+              </div>
+
+              <h1 className="mt-3 text-xl font-black tracking-tight text-slate-950 sm:text-3xl">
+                Lastik Otelim Abonelik Planı
+              </h1>
+
+              <p className="mt-2 max-w-2xl text-xs font-medium leading-6 text-slate-500 sm:text-sm">
+                Mevcut abonelik durumunuzu görüntüleyin, ihtiyacınıza uygun
+                paketi seçin ve ödeme işlemini adım adım tamamlayın.
+              </p>
             </div>
-
-            <h1 className="mt-4 text-xl font-black tracking-tight text-slate-950 sm:text-3xl">
-              LastikOtelim Abonelik Planı
-            </h1>
-
-            <p className="mt-2 max-w-2xl text-xs font-medium leading-6 text-slate-500 sm:text-sm">
-              Abonelik ve ödeme servisleri backend tarafında
-              hazır olduğunda bu ekran gerçek abonelik durumuyla
-              çalışacaktır. Şu anda sahte ödeme veya local
-              abonelik işlemi yapılmaz.
-            </p>
 
             <button
               type="button"
               onClick={handleRefreshSubscription}
-              className="mt-5 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.98]"
+              className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.98]"
             >
               <RefreshCcw className="h-3.5 w-3.5" />
-              API Verilerini Yenile
+              Bilgileri Yenile
             </button>
           </div>
         </header>
 
-        {/* Aktif veya pasif abonelik özeti */}
         {subscription.isActive ? (
           <section className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-white p-5 shadow-sm sm:rounded-[2rem] sm:p-6">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
@@ -228,15 +975,11 @@ export default function SubscriptionPage({
                   </p>
 
                   <h2 className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">
-                    {currentPlan?.name ||
-                      subscription.planName ||
-                      "Aktif"}{" "}
-                    Plan
+                    {currentPlan?.name || subscription.planName || "Aktif"} Plan
                   </h2>
 
                   <p className="mt-1 text-xs font-semibold leading-5 text-slate-500 sm:text-sm">
-                    Bitiş veya yenileme tarihi:{" "}
-                    {formatDateTR(activeEndDate)}
+                    Bitiş veya yenileme tarihi: {formatDateTR(activeEndDate)}
                   </p>
                 </div>
               </div>
@@ -245,21 +988,13 @@ export default function SubscriptionPage({
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <SubscriptionSummaryCard
                     label="Ödeme Periyodu"
-                    value={getBillingCycleLabel(
-                      billingCycle
-                    )}
-                    description={getBillingCycleDescription(
-                      billingCycle
-                    )}
+                    value={getBillingCycleLabel(billingCycle)}
+                    description={getBillingCycleDescription(billingCycle)}
                   />
 
                   <SubscriptionSummaryCard
                     label="Paket Tutarı"
-                    value={
-                      activePlanPrice
-                        ? formatPrice(activePlanPrice)
-                        : "-"
-                    }
+                    value={activePlanPrice ? formatPrice(activePlanPrice) : "-"}
                     description="Aktif"
                     descriptionClass="text-emerald-600"
                   />
@@ -294,146 +1029,856 @@ export default function SubscriptionPage({
 
                 <div className="min-w-0">
                   <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-100 sm:text-xs">
-                    Abonelik Endpoint'i Bekleniyor
+                    {isSubscriptionPending
+                      ? "Havale Onayı Bekleniyor"
+                      : "Abonelik Durumu"}
                   </p>
 
                   <h2 className="mt-1 text-lg font-black leading-snug sm:text-xl">
-                    LastikOtelim abonelik sistemi backend'e
-                    bağlanacak
+                    {isSubscriptionPending
+                      ? "Havale abonelik talebiniz oluşturuldu"
+                      : "Aktif abonelik kaydı bulunamadı"}
                   </h2>
 
                   <p className="mt-2 max-w-2xl text-xs font-semibold leading-6 text-blue-100 sm:text-sm">
-                    Müşteri, emanet, depo, barkod ve raporlama
-                    özellikleri için planlar hazırdır. Ödeme ve
-                    abonelik durumu backend endpoint'i geldiğinde
-                    aktif edilecektir.
+                    {isSubscriptionPending
+                      ? "Ödemeniz kontrol edildikten sonra hesabınız aktif edilecektir."
+                      : "Abone ol butonuna basarak paket seçimi ve ödeme adımlarına geçebilirsiniz."}
                   </p>
                 </div>
               </div>
 
-              <div className="shrink-0 rounded-2xl bg-white/10 px-5 py-3 text-center text-xs font-black ring-1 ring-inset ring-white/20 sm:text-sm">
-                Sahte abonelik oluşturulmaz
+              <div className="flex shrink-0 flex-col gap-2 sm:min-w-[220px]">
+                <div className="rounded-2xl bg-white/10 px-5 py-3 text-center text-xs font-black ring-1 ring-inset ring-white/20 sm:text-sm">
+                  {isSubscriptionPending ? "Onay bekleniyor" : "Abonelik yok"}
+                </div>
+
+                {!isSubscriptionPending && !isSubscribeFlowOpen && (
+                  <button
+                    type="button"
+                    onClick={handleStartSubscription}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-5 text-xs font-black text-blue-700 shadow-lg shadow-blue-950/10 transition hover:bg-blue-50 active:scale-[0.98] sm:text-sm"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Abone Ol
+                  </button>
+                )}
               </div>
             </div>
           </section>
         )}
 
-        {/* Plan kartları */}
-        <section>
-          <div className="mb-4 sm:mb-5">
-            <h2 className="text-base font-black text-slate-950 sm:text-lg">
-              Abonelik Planları
-            </h2>
+        {!subscription.isActive &&
+          (isSubscribeFlowOpen || Boolean(bankTransferReceipt)) &&
+          (!isSubscriptionPending || Boolean(bankTransferReceipt)) && (
+            <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm sm:rounded-[2rem]">
+              <div className="border-b border-slate-100 p-5 sm:p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-700">
+                      Abonelik Başlat
+                    </p>
 
-            <p className="mt-1 text-xs font-medium text-slate-500">
-              İşletmenizin kayıt ve kullanıcı ihtiyacına uygun
-              paketi inceleyin.
-            </p>
-          </div>
+                    <h2 className="mt-1 text-lg font-black text-slate-950 sm:text-xl">
+                      {subscriptionStep === "plans" && "Paket seçimi"}
+                      {subscriptionStep === "details" && "Ödeme bilgileri"}
+                      {subscriptionStep === "payment" && "Ödeme yöntemi"}
+                      {subscriptionStep === "bankTransferReceipt" &&
+                        "Havale talebi oluşturuldu"}
+                    </h2>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
-            {PLANS.map((plan) => {
-              const isCurrentPlan =
-                subscription.isActive &&
-                subscription.planId === plan.id;
+                    <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+                      {subscriptionStep === "plans" &&
+                        "İşletmenize uygun abonelik paketini seçin."}
+                      {subscriptionStep === "details" &&
+                        "Adres ve kimlik/vergi bilgilerinizi kontrol edin."}
+                      {subscriptionStep === "payment" &&
+                        "Ödemenizi kart veya havale/EFT ile tamamlayın."}
+                      {subscriptionStep === "bankTransferReceipt" &&
+                        "Açıklama kısmına referans kodunu yazarak ödeme yapın."}
+                    </p>
+                  </div>
 
-              return (
-                <article
-                  key={plan.id}
-                  className={`relative flex min-w-0 flex-col rounded-2xl border bg-white p-5 shadow-sm transition duration-300 sm:rounded-[2rem] sm:p-6 lg:hover:-translate-y-1 lg:hover:shadow-xl ${
-                    plan.popular
-                      ? "border-blue-200 ring-4 ring-blue-50"
-                      : "border-slate-200/80"
-                  }`}
-                >
-                  {plan.popular && (
-                    <div className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-blue-700 sm:right-5 sm:top-5 sm:px-3 sm:text-[10px]">
-                      <Sparkles className="h-3 w-3" />
-                      Önerilen
+                  <div className="flex flex-col gap-3 lg:items-end">
+                    <SubscriptionFlowStepper currentStep={subscriptionStep} />
+
+                    {subscriptionStep !== "bankTransferReceipt" && (
+                      <button
+                        type="button"
+                        onClick={handleCloseSubscriptionFlow}
+                        disabled={
+                          Boolean(paymentLoadingPlanId) ||
+                          isThreeDSLoading ||
+                          isAddressSaving
+                        }
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Kapat
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 sm:p-6">
+                {subscriptionStep === "plans" && (
+                  <div>
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-base font-black text-slate-950">
+                          Abonelik Planları
+                        </h3>
+
+                        <p className="mt-1 text-xs font-medium text-slate-500">
+                          Paketleri inceleyip devam etmek istediğiniz planı seçin.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isPlansLoading && (
+                          <span className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700">
+                            Planlar yükleniyor...
+                          </span>
+                        )}
+
+                        {!isPlansLoading && apiPlans.length > 0 && (
+                          <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700">
+                            Planlar hazır
+                          </span>
+                        )}
+
+                        {!isPlansLoading && plansError && (
+                          <span
+                            title={plansError}
+                            className="inline-flex items-center rounded-full border border-amber-100 bg-amber-50 px-3 py-1 text-[10px] font-black text-amber-700"
+                          >
+                            Planlar geçici olarak gösteriliyor
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
+                      {plans.map((plan) => {
+                        const isCurrentPlan =
+                          subscription.isActive &&
+                          (String(subscription.planId || "") === plan.id ||
+                            subscription.planName === plan.name);
+
+                        return (
+                          <article
+                            key={plan.id}
+                            className={`relative flex min-w-0 flex-col rounded-2xl border bg-white p-5 shadow-sm transition duration-300 sm:rounded-[2rem] sm:p-6 lg:hover:-translate-y-1 lg:hover:shadow-xl ${
+                              selectedPlan?.id === plan.id
+                                ? "border-blue-300 ring-4 ring-blue-50"
+                                : plan.popular
+                                  ? "border-blue-200 ring-4 ring-blue-50"
+                                  : "border-slate-200/80"
+                            }`}
+                          >
+                            {plan.popular && (
+                              <div className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-blue-700 sm:right-5 sm:top-5 sm:px-3 sm:text-[10px]">
+                                <Sparkles className="h-3 w-3" />
+                                Önerilen
+                              </div>
+                            )}
+
+                            <div className="pr-20">
+                              <h3 className="text-lg font-black text-slate-950">
+                                {plan.name}
+                              </h3>
+
+                              <p className="mt-2 text-xs font-medium leading-5 text-slate-500 sm:min-h-10 sm:text-sm sm:leading-relaxed">
+                                {plan.description}
+                              </p>
+                            </div>
+
+                            <div className="mt-5 border-y border-slate-100 py-5 sm:mt-6">
+                              <div className="flex flex-wrap items-end gap-1">
+                                <span className="text-3xl font-black tracking-tight text-slate-950">
+                                  {formatPrice(plan.price)}
+                                </span>
+
+                                <span className="pb-1 text-xs font-bold text-slate-400 sm:text-sm">
+                                  / {plan.durationLabel}
+                                </span>
+                              </div>
+
+                              <div className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-400">
+                                <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+                                {plan.vatExcludedPrice
+                                  ? `KDV hariç: ${formatPrice(
+                                      plan.vatExcludedPrice
+                                    )}`
+                                  : "Plan fiyatı"}
+                                {plan.vatPercent
+                                  ? ` • KDV: %${plan.vatPercent}`
+                                  : ""}
+                              </div>
+                            </div>
+
+                            <div className="mt-5 space-y-3">
+                              {plan.features.map((feature) => (
+                                <div
+                                  key={feature}
+                                  className="flex items-start gap-2 text-xs font-bold leading-5 text-slate-600 sm:text-sm"
+                                >
+                                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                                  <span>{feature}</span>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                              <p className="mb-3 text-[9px] font-black uppercase tracking-[0.14em] text-slate-400 sm:text-[10px]">
+                                Paket Detayları
+                              </p>
+
+                              <div className="space-y-2">
+                                {plan.limits.map((limit) => (
+                                  <div
+                                    key={limit}
+                                    className="flex items-start gap-2 text-xs font-bold leading-5 text-slate-600"
+                                  >
+                                    <BadgeCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
+                                    <span>{limit}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={isCurrentPlan || !plan.isFromApi}
+                              onClick={() => handleSelectPlan(plan)}
+                              className={`mt-6 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-xs font-black transition active:scale-[0.98] disabled:cursor-not-allowed sm:text-sm ${
+                                isCurrentPlan
+                                  ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : plan.isFromApi
+                                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
+                                    : "border border-slate-200 bg-slate-50 text-slate-400"
+                              }`}
+                            >
+                              {isCurrentPlan
+                                ? "Mevcut Plan"
+                                : plan.isFromApi
+                                  ? "Bu Paketi Seç"
+                                  : "Ödeme Seçeneği Hazır Değil"}
+                            </button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {subscriptionStep === "details" && selectedPlan && (
+                  <div className="space-y-5">
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-700">
+                            Seçilen Paket
+                          </p>
+
+                          <h3 className="mt-1 text-base font-black text-slate-950">
+                            {selectedPlan.name}
+                          </h3>
+
+                          <p className="mt-1 text-xs font-bold text-slate-500">
+                            Tutar: {formatPrice(selectedPlan.price)}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleBackToPlans}
+                          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-100 bg-white px-4 text-xs font-black text-blue-700 transition hover:bg-blue-50"
+                        >
+                          Paketi Değiştir
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-5">
+                      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                            <MapPin className="h-5 w-5" />
+                          </div>
+
+                          <div className="min-w-0">
+                            <h3 className="text-base font-black text-slate-950">
+                              Teslimat / Fatura Bilgisi
+                            </h3>
+
+                            <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+                              Havale ve kart ödemesi için bu bilgiler gereklidir.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isAddressesLoading && (
+                            <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700">
+                              Adresler yükleniyor...
+                            </span>
+                          )}
+
+                          {!isAddressesLoading && shippingAddress && (
+                            <span className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[10px] font-black text-emerald-700">
+                              Adres hazır
+                            </span>
+                          )}
+
+                          {!isAddressesLoading && !shippingAddress && (
+                            <span className="rounded-full border border-amber-100 bg-amber-50 px-3 py-1 text-[10px] font-black text-amber-700">
+                              Adres gerekli
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {addressesError && (
+                        <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">
+                          {addressesError}
+                        </div>
+                      )}
+
+                      {shippingAddress ? (
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
+                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-emerald-700">
+                              {getAddressTypeLabel(shippingAddress)}
+                            </p>
+
+                            <h3 className="mt-1 text-sm font-black text-slate-950">
+                              {shippingAddress.title || "Kayıtlı Adres"}
+                            </h3>
+
+                            <p className="mt-2 text-xs font-bold leading-5 text-slate-600">
+                              {shippingAddress.contactName ||
+                                "Yetkili kişi belirtilmemiş"}
+                            </p>
+
+                            <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+                              {getAddressSummary(shippingAddress)}
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                            <label className="block text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                              T.C. Kimlik No / Vergi No
+                            </label>
+
+                            <input
+                              value={identityNumber}
+                              onChange={(event) =>
+                                setIdentityNumber(
+                                  normalizeOnlyNumbers(event.target.value)
+                                )
+                              }
+                              inputMode="numeric"
+                              maxLength={11}
+                              placeholder="10 veya 11 hane"
+                              className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+                            />
+
+                            <p className="mt-2 text-[11px] font-medium leading-5 text-slate-400">
+                              Ödeme işlemi için gereklidir.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                          <AddressInput
+                            label="Adres Başlığı"
+                            value={addressForm.title}
+                            onChange={handleAddressInputChange("title")}
+                            placeholder="Ana Teslimat Adresi"
+                          />
+
+                          <AddressInput
+                            label="Yetkili Kişi"
+                            value={addressForm.contactName}
+                            onChange={handleAddressInputChange("contactName")}
+                            placeholder="İsim Soyisim"
+                          />
+
+                          <div className="lg:col-span-2">
+                            <label className="block text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                              Açık Adres
+                            </label>
+
+                            <textarea
+                              value={addressForm.addressLine}
+                              onChange={handleAddressInputChange(
+                                "addressLine"
+                              )}
+                              placeholder="Mahalle, cadde, sokak, bina no..."
+                              rows={3}
+                              className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+                            />
+                          </div>
+
+                          <AddressInput
+                            label="Şehir"
+                            value={addressForm.city}
+                            onChange={handleAddressInputChange("city")}
+                            placeholder="Çorum"
+                          />
+
+                          <AddressInput
+                            label="Ülke"
+                            value={addressForm.country}
+                            onChange={handleAddressInputChange("country")}
+                            placeholder="Türkiye"
+                          />
+
+                          <AddressInput
+                            label="Posta Kodu"
+                            value={addressForm.zipCode}
+                            onChange={handleAddressInputChange("zipCode")}
+                            placeholder="19000"
+                          />
+
+                          <div className="flex items-end">
+                            <button
+                              type="button"
+                              onClick={handleCreateAddress}
+                              disabled={isAddressSaving}
+                              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 text-xs font-black text-white shadow-lg shadow-slate-900/10 transition hover:bg-slate-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              <Save className="h-4 w-4" />
+                              {isAddressSaving
+                                ? "Adres Kaydediliyor..."
+                                : "Adresi Kaydet"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={handleBackToPlans}
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-5 text-xs font-black text-slate-600 transition hover:bg-slate-100"
+                      >
+                        Geri
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleContinueToPayment}
+                        disabled={isAddressesLoading || isAddressSaving}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-xs font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-blue-400"
+                      >
+                        Ödeme Seçeneklerine Geç
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {subscriptionStep === "payment" && selectedPlan && (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 lg:col-span-1">
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-700">
+                          Seçilen Paket
+                        </p>
+
+                        <h3 className="mt-1 text-base font-black text-slate-950">
+                          {selectedPlan.name}
+                        </h3>
+
+                        <p className="mt-1 text-xs font-bold text-slate-500">
+                          Tutar: {formatPrice(selectedPlan.price)}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handlePlanAction(selectedPlan)}
+                        disabled={Boolean(paymentLoadingPlanId) || isThreeDSLoading}
+                        className="flex min-h-[128px] flex-col items-start justify-center rounded-2xl border border-emerald-100 bg-emerald-50 p-5 text-left transition hover:bg-emerald-100/60 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-white">
+                          <Landmark className="h-5 w-5" />
+                        </div>
+
+                        <span className="mt-3 text-sm font-black text-slate-950">
+                          {paymentLoadingPlanId === selectedPlan.id
+                            ? "Talep Oluşturuluyor..."
+                            : "Havale / EFT ile Öde"}
+                        </span>
+
+                        <span className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                          Referans kodu oluşturulur, ödeme sonrası hesabınız
+                          kontrol edilir.
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenThreeDSForm(selectedPlan)}
+                        disabled={
+                          Boolean(paymentLoadingPlanId) ||
+                          isThreeDSLoading ||
+                          !selectedPlan.isFromApi
+                        }
+                        className="flex min-h-[128px] flex-col items-start justify-center rounded-2xl border border-blue-100 bg-blue-50 p-5 text-left transition hover:bg-blue-100/70 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white">
+                          <CreditCard className="h-5 w-5" />
+                        </div>
+
+                        <span className="mt-3 text-sm font-black text-slate-950">
+                          3D Kart ile Öde
+                        </span>
+
+                        <span className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                          Kart bilgilerinizi girerek güvenli ödeme adımına
+                          devam edin.
+                        </span>
+                      </button>
+                    </div>
+
+                    {selectedThreeDSPlan && (
+                      <div className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm sm:p-5">
+                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-700">
+                              Kart ile Ödeme
+                            </p>
+
+                            <h2 className="mt-1 text-lg font-black text-slate-950">
+                              {selectedThreeDSPlan.name}
+                            </h2>
+
+                            <p className="mt-1 text-xs font-semibold text-slate-500">
+                              Tutar: {formatPrice(selectedThreeDSPlan.price)}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleCloseThreeDSForm}
+                            disabled={isThreeDSLoading}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
+                          >
+                            Kapat
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                          <AddressInput
+                            label="Kart Üzerindeki İsim"
+                            value={threeDSForm.cardHolderName}
+                            onChange={handleThreeDSInputChange("cardHolderName")}
+                            placeholder="İsim Soyisim"
+                          />
+
+                          <AddressInput
+                            label="Kart Numarası"
+                            value={threeDSForm.cardNumber}
+                            onChange={handleThreeDSInputChange("cardNumber")}
+                            placeholder="0000 0000 0000 0000"
+                          />
+
+                          <AddressInput
+                            label="Son Kullanma Ay"
+                            value={threeDSForm.expireMonth}
+                            onChange={handleThreeDSInputChange("expireMonth")}
+                            placeholder="12"
+                          />
+
+                          <AddressInput
+                            label="Son Kullanma Yıl"
+                            value={threeDSForm.expireYear}
+                            onChange={handleThreeDSInputChange("expireYear")}
+                            placeholder="2030"
+                          />
+
+                          <AddressInput
+                            label="CVC"
+                            value={threeDSForm.cvc}
+                            onChange={handleThreeDSInputChange("cvc")}
+                            placeholder="123"
+                          />
+
+                          <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-xs font-black text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={threeDSForm.registerCard}
+                              onChange={(event) =>
+                                setThreeDSForm((currentForm) => ({
+                                  ...currentForm,
+                                  registerCard: event.target.checked
+                                }))
+                              }
+                              className="h-4 w-4 rounded border-slate-300"
+                            />
+                            Kartı sonraki ödemeler için kaydet
+                          </label>
+
+                          <div className="lg:col-span-2">
+                            <button
+                              type="button"
+                              onClick={handleInitializeThreeDSPayment}
+                              disabled={isThreeDSLoading}
+                              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-xs font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-blue-400"
+                            >
+                              <CreditCard className="h-4 w-4" />
+                              {isThreeDSLoading
+                                ? "Ödeme Başlatılıyor..."
+                                : "3D Kart ile Öde"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={handleBackToDetails}
+                        disabled={Boolean(paymentLoadingPlanId) || isThreeDSLoading}
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-5 text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Geri
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {subscriptionStep === "bankTransferReceipt" &&
+                  bankTransferReceipt && (
+                    <div className="space-y-5">
+                      <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-white p-5 shadow-sm">
+                        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="flex min-w-0 items-start gap-4">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-lg shadow-emerald-500/20">
+                              <Landmark className="h-6 w-6" />
+                            </div>
+
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-700 sm:text-xs">
+                                Havale Talebi Oluşturuldu
+                              </p>
+
+                              <h2 className="mt-1 text-lg font-black leading-snug text-slate-950 sm:text-xl">
+                                {bankTransferReceipt.subscriptionPlan}
+                              </h2>
+
+                              <p className="mt-2 text-xs font-semibold leading-6 text-slate-500 sm:text-sm">
+                                Ödemenizi banka hesabına gönderirken açıklama
+                                alanına aşağıdaki referans kodunu yazın.
+                                Ödemeniz kontrol edildikten sonra hesabınız
+                                aktif edilecektir.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid min-w-[260px] gap-3 rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+                            <div>
+                              <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">
+                                Referans Kodu
+                              </p>
+
+                              <p className="mt-1 select-all rounded-xl bg-slate-950 px-4 py-3 text-center text-xl font-black tracking-[0.18em] text-white">
+                                {bankTransferReceipt.referenceCode || "-"}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">
+                              <span>Tutar</span>
+
+                              <span className="text-slate-950">
+                                {formatPrice(bankTransferReceipt.amount)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 sm:p-5">
+                        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-emerald-700">
+                              Banka Hesapları
+                            </p>
+
+                            <h3 className="mt-1 text-sm font-black text-slate-950">
+                              Aşağıdaki hesaplardan birine ödeme yapın
+                            </h3>
+
+                            <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                              Açıklama alanına mutlaka referans kodunu yazın:{" "}
+                              <span className="font-black text-slate-950">
+                                {bankTransferReceipt.referenceCode || "-"}
+                              </span>
+                            </p>
+                          </div>
+
+                          {isBankAccountsLoading && (
+                            <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700">
+                              Hesaplar yükleniyor...
+                            </span>
+                          )}
+                        </div>
+
+                        {bankAccountsError && (
+                          <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">
+                            {bankAccountsError}
+                          </div>
+                        )}
+
+                        {!isBankAccountsLoading &&
+                          !bankAccountsError &&
+                          bankAccounts.length === 0 && (
+                            <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-800">
+                              Banka hesabı bulunamadı. Lütfen ödeme için işletme
+                              yetkilisiyle iletişime geçin.
+                            </div>
+                          )}
+
+                        {bankAccounts.length > 0 && (
+                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                            {bankAccounts.map((account) => (
+                              <div
+                                key={`${account.bankName}-${account.iban}`}
+                                className="rounded-2xl border border-slate-100 bg-white p-4"
+                              >
+                                <div className="flex flex-col gap-1">
+                                  <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                                    Banka
+                                  </p>
+
+                                  <h4 className="text-sm font-black text-slate-950">
+                                    {account.bankName || "-"}
+                                  </h4>
+                                </div>
+
+                                <div className="mt-3 grid gap-2 text-xs font-bold text-slate-600">
+                                  <div>
+                                    <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">
+                                      Hesap Sahibi
+                                    </p>
+
+                                    <p className="mt-1 text-slate-700">
+                                      {account.holderName || "-"}
+                                    </p>
+                                  </div>
+
+                                  <div>
+                                    <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">
+                                      IBAN
+                                    </p>
+
+                                    <p className="mt-1 select-all break-words rounded-xl bg-slate-50 px-3 py-2 font-black tracking-wide text-slate-950">
+                                      {formatIban(account.iban || "") || "-"}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                                    <span>Para Birimi</span>
+
+                                    <span className="font-black text-slate-950">
+                                      {account.currency || "TRY"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
-
-                  <div className="pr-20">
-                    <h3 className="text-lg font-black text-slate-950">
-                      {plan.name}
-                    </h3>
-
-                    <p className="mt-2 text-xs font-medium leading-5 text-slate-500 sm:min-h-10 sm:text-sm sm:leading-relaxed">
-                      {plan.description}
-                    </p>
-                  </div>
-
-                  <div className="mt-5 border-y border-slate-100 py-5 sm:mt-6">
-                    <div className="flex flex-wrap items-end gap-1">
-                      <span className="text-3xl font-black tracking-tight text-slate-950">
-                        {formatPrice(plan.monthlyPrice)}
-                      </span>
-
-                      <span className="pb-1 text-xs font-bold text-slate-400 sm:text-sm">
-                        / aylık
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex items-center gap-2 text-xs font-bold text-slate-400">
-                      <CalendarDays className="h-3.5 w-3.5 shrink-0" />
-                      Yıllık: {formatPrice(plan.yearlyPrice)}
-                    </div>
-                  </div>
-
-                  <div className="mt-5 space-y-3">
-                    {plan.features.map((feature) => (
-                      <div
-                        key={feature}
-                        className="flex items-start gap-2 text-xs font-bold leading-5 text-slate-600 sm:text-sm"
-                      >
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                        <span>{feature}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                    <p className="mb-3 text-[9px] font-black uppercase tracking-[0.14em] text-slate-400 sm:text-[10px]">
-                      Paket Limitleri
-                    </p>
-
-                    <div className="space-y-2">
-                      {plan.limits.map((limit) => (
-                        <div
-                          key={limit}
-                          className="flex items-start gap-2 text-xs font-bold leading-5 text-slate-600"
-                        >
-                          <BadgeCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
-                          <span>{limit}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={isCurrentPlan}
-                    onClick={() => handlePlanAction(plan)}
-                    className={`mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-xl px-4 text-xs font-black transition active:scale-[0.98] disabled:cursor-not-allowed sm:mt-7 sm:text-sm ${
-                      isCurrentPlan
-                        ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : plan.popular
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
-                          : "border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    {isCurrentPlan
-                      ? "Mevcut Plan"
-                      : subscription.isActive
-                        ? "Endpoint Bekleniyor"
-                        : "Backend Bağlantısı Bekleniyor"}
-                  </button>
-                </article>
-              );
-            })}
-          </div>
-        </section>
+              </div>
+            </section>
+          )}
       </div>
+    </div>
+  );
+
+}
+
+
+function SubscriptionFlowStepper({
+  currentStep
+}: {
+  currentStep: SubscriptionFlowStep;
+}) {
+  const steps: { key: SubscriptionFlowStep; label: string }[] = [
+    { key: "plans", label: "Paket" },
+    { key: "details", label: "Bilgiler" },
+    { key: "payment", label: "Ödeme" },
+    { key: "bankTransferReceipt", label: "Sonuç" }
+  ];
+
+  const activeIndex = steps.findIndex((step) => step.key === currentStep);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {steps.map((step, index) => {
+        const isActive = step.key === currentStep;
+        const isCompleted = activeIndex > index;
+
+        return (
+          <div
+            key={step.key}
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-black ${
+              isActive
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : isCompleted
+                  ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                  : "border-slate-200 bg-slate-50 text-slate-400"
+            }`}
+          >
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
+                isActive
+                  ? "bg-blue-600 text-white"
+                  : isCompleted
+                    ? "bg-emerald-500 text-white"
+                    : "bg-white text-slate-400"
+              }`}
+            >
+              {index + 1}
+            </span>
+            {step.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AddressInput({
+  label,
+  value,
+  onChange,
+  placeholder
+}: {
+  label: string;
+  value: string;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  placeholder: string;
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+        {label}
+      </label>
+
+      <input
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+      />
     </div>
   );
 }
@@ -459,9 +1904,7 @@ function SubscriptionSummaryCard({
 
       <p
         className={`mt-1 truncate font-black text-slate-950 ${
-          compactValue
-            ? "text-sm"
-            : "text-lg"
+          compactValue ? "text-sm" : "text-lg"
         }`}
         title={value}
       >

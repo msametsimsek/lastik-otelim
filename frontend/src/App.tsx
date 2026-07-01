@@ -40,6 +40,7 @@ import {
   getStoredAuthUser,
   revokeToken
 } from "./services/authApi";
+import { SubscriptionApi } from "./services/subscriptionApi";
 
 const defaultSettings: AppSettings = {
   businessName: "LastikOtelim",
@@ -312,12 +313,74 @@ export default function App() {
     setActiveTab("dashboard");
   };
 
-  const handleSubscriptionChange = async () => {
-    /**
-     * Abonelik endpointi netleşene kadar App içinde global veri yenilemesi yapılmaz.
-     */
+const handleSubscriptionChange = async () => {
+  try {
+    const response = await SubscriptionApi.getSubscriptions({
+      page: 0,
+      pageSize: 20
+    });
+
+    const activeSubscription = response.items.find((item) => {
+      if (typeof item.isActive === "boolean") {
+        return item.isActive;
+      }
+
+      if (typeof item.status === "boolean") {
+        return item.status;
+      }
+
+      if (typeof item.status === "string") {
+        return item.status.toLowerCase() === "active";
+      }
+
+      return false;
+    });
+
+    if (!activeSubscription) {
+      setSubscription(defaultSubscription);
+      return;
+    }
+
+    setSubscription({
+      id: String(activeSubscription.id || "active-subscription"),
+      planId: activeSubscription.subscriptionPlanId
+        ? String(activeSubscription.subscriptionPlanId)
+        : activeSubscription.planId
+          ? String(activeSubscription.planId)
+          : null,
+      planName:
+        activeSubscription.subscriptionPlanName ||
+        activeSubscription.planName ||
+        "",
+      status: "active",
+      isActive: true,
+      amount:
+        typeof activeSubscription.price === "number"
+          ? activeSubscription.price
+          : typeof activeSubscription.amount === "number"
+            ? activeSubscription.amount
+            : undefined,
+      currency: "TRY",
+      startedAt:
+        activeSubscription.startDate ||
+        activeSubscription.startedAt ||
+        activeSubscription.createdDate,
+      renewalDate:
+        activeSubscription.renewalDate ||
+        activeSubscription.endDate ||
+        activeSubscription.periodEndAt,
+      periodEndAt:
+        activeSubscription.periodEndAt ||
+        activeSubscription.endDate ||
+        activeSubscription.renewalDate,
+      cancelledAt:
+        activeSubscription.cancelledAt || undefined
+    });
+  } catch (error) {
+    console.warn("Abonelik bilgisi yüklenemedi:", error);
     setSubscription(defaultSubscription);
-  };
+  }
+};
 
   if (isAuthChecking) {
     return (

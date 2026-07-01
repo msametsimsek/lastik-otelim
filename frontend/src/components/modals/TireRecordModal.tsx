@@ -272,6 +272,11 @@ export default function TireRecordModal({
   const effectiveVehicleId =
     selectedVehicleId || (effectiveVehicle ? String(effectiveVehicle.id) : "");
 
+  const selectedVehicleUploadFiles = useMemo(
+    () => effectiveVehicle?.uploadFiles || [],
+    [effectiveVehicle],
+  );
+
   const brandOptions = useMemo(() => {
     const apiBrands = constants
       .filter((item) => item.type === "TIRE_TYPE")
@@ -323,44 +328,44 @@ export default function TireRecordModal({
   );
 
   useEffect(() => {
-  if (currentStep !== 1 || !effectiveClientId) {
-    return;
-  }
+    if (currentStep !== 1 || !effectiveClientId) {
+      return;
+    }
 
-  let isMounted = true;
+    let isMounted = true;
 
-  async function loadClientVehicles() {
-    try {
-      setIsSearchingVehicle(true);
+    async function loadClientVehicles() {
+      try {
+        setIsSearchingVehicle(true);
 
-      const response = await vehicleApi.getVehicles({
-        page: 0,
-        pageSize: 50,
-        clientId: Number(effectiveClientId)
-      });
+        const response = await vehicleApi.getVehicles({
+          page: 0,
+          pageSize: 50,
+          clientId: Number(effectiveClientId),
+        });
 
-      if (!isMounted) return;
+        if (!isMounted) return;
 
-      setVehicleSearchResults(response.items || []);
-    } catch (error) {
-      console.error(error);
+        setVehicleSearchResults(response.items || []);
+      } catch (error) {
+        console.error(error);
 
-      if (!isMounted) return;
+        if (!isMounted) return;
 
-      setVehicleSearchResults([]);
-    } finally {
-      if (isMounted) {
-        setIsSearchingVehicle(false);
+        setVehicleSearchResults([]);
+      } finally {
+        if (isMounted) {
+          setIsSearchingVehicle(false);
+        }
       }
     }
-  }
 
-  loadClientVehicles();
+    loadClientVehicles();
 
-  return () => {
-    isMounted = false;
-  };
-}, [currentStep, effectiveClientId]);
+    return () => {
+      isMounted = false;
+    };
+  }, [currentStep, effectiveClientId]);
 
   useEffect(() => {
     pendingPhotosRef.current = pendingPhotos;
@@ -382,14 +387,14 @@ export default function TireRecordModal({
     };
   }, []);
 
-const showToastRef = useRef(showToast);
+  const showToastRef = useRef(showToast);
 
-useEffect(() => {
-  showToastRef.current = showToast;
-}, [showToast]);
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
 
-useEffect(() => {
-  let isMounted = true;
+  useEffect(() => {
+    let isMounted = true;
 
   async function loadConstants() {
     try {
@@ -550,11 +555,20 @@ useEffect(() => {
     });
   };
 
-  const handleSelectVehicle = (vehicle: VehicleListItemDto) => {
+  const handleSelectVehicle = async (vehicle: VehicleListItemDto) => {
     setSelectedVehicleId(String(vehicle.id));
     setPlate(vehicle.licensePlate || "");
     setVehicleNote(vehicle.note || "");
     setVehicleSearchResults([vehicle]);
+
+    try {
+      const vehicleDetail = await vehicleApi.getVehicleById(vehicle.id);
+
+      setVehicleSearchResults([vehicleDetail]);
+      setVehicleNote(vehicleDetail.note || "");
+    } catch (error) {
+      console.warn("Araç detayı yüklenemedi, liste verisi kullanılacak:", error);
+    }
   };
 
   const clearSelectedVehicle = () => {
@@ -737,7 +751,7 @@ useEffect(() => {
         const sameVehicleClientId = String(samePlateVehicle.clientId || "");
 
         if (effectiveClientId && sameVehicleClientId === effectiveClientId) {
-          handleSelectVehicle(samePlateVehicle);
+          await handleSelectVehicle(samePlateVehicle);
           showToast("Mevcut araç kaydı eşleştirildi.", "info");
           return true;
         }
@@ -793,7 +807,6 @@ useEffect(() => {
 
   const uploadPhotos = async (
     photos: PendingPhoto[],
-    source: "vehicle" | "tire",
     offset = 0,
     total = photos.length,
   ): Promise<TirePhoto[]> => {
@@ -824,7 +837,6 @@ useEffect(() => {
         type: pendingPhoto.type || "image/*",
         dataUrl: previewUrl || pendingPhoto.previewUrl,
         fileUrl: uploadedFile.fileUrl,
-        source,
       });
 
       setUploadProgress({
@@ -840,14 +852,14 @@ useEffect(() => {
     offset = 0,
     total = pendingPhotos.length,
   ): Promise<TirePhoto[]> => {
-    return uploadPhotos(pendingPhotos, "tire", offset, total);
+    return uploadPhotos(pendingPhotos, offset, total);
   };
 
   const uploadVehiclePendingPhotos = async (
     offset = 0,
     total = vehiclePendingPhotos.length,
   ): Promise<TirePhoto[]> => {
-    return uploadPhotos(vehiclePendingPhotos, "vehicle", offset, total);
+    return uploadPhotos(vehiclePendingPhotos, offset, total);
   };
 
   const handleSave = async (autoPrint: boolean) => {
@@ -1010,7 +1022,7 @@ useEffect(() => {
         quantity: finalQuantity,
         storageLocation: finalLocation,
         vehicleNote: effectiveVehicle?.note || trimmedVehicleNote,
-        photos: [...uploadedVehiclePhotos, ...uploadedPhotos],
+        photos: uploadedPhotos,
         createdAt: createdTire.createdDate || new Date().toISOString(),
         updatedAt: createdTire.createdDate || new Date().toISOString(),
         status: "active",
@@ -1411,7 +1423,7 @@ useEffect(() => {
                               <button
                                 key={vehicle.id}
                                 type="button"
-                                onClick={() => handleSelectVehicle(vehicle)}
+                                onClick={() => void handleSelectVehicle(vehicle)}
                                 disabled={isBusy}
                                 className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
                               >
@@ -1435,6 +1447,71 @@ useEffect(() => {
                       <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">
                         Kayıtlı araç seçilmezse bu plaka ile yeni araç
                         oluşturulacak.
+                      </div>
+                    )}
+
+                    {effectiveVehicle && (
+                      <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="mb-3 flex items-end justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Camera className="h-4 w-4 text-blue-600" />
+                              <h5 className="text-sm font-black text-slate-900">
+                                Seçili Araç Görselleri
+                              </h5>
+                            </div>
+
+                            <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                              Vehicle/GetById içindeki mevcut uploadFiles
+                            </p>
+                          </div>
+
+                          <span className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700">
+                            {selectedVehicleUploadFiles.length} mevcut
+                          </span>
+                        </div>
+
+                        {selectedVehicleUploadFiles.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center">
+                            <p className="text-xs font-bold text-slate-400">
+                              Bu araçta kayıtlı görsel yok
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                            {selectedVehicleUploadFiles.map((file) => {
+                              const imageUrl = pickImagePreviewUrl(
+                                file as Parameters<typeof pickImagePreviewUrl>[0],
+                              );
+
+                              return (
+                                <div
+                                  key={String(
+                                    file.id || file.fileId || file.fileUrl,
+                                  )}
+                                  className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"
+                                >
+                                  {imageUrl ? (
+                                    <img
+                                      src={imageUrl}
+                                      alt={
+                                        file.orginalName ||
+                                        file.originalName ||
+                                        "Araç görseli"
+                                      }
+                                      referrerPolicy="no-referrer"
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center">
+                                      <Camera className="h-5 w-5 text-slate-300" />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
 
